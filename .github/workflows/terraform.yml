@@ -1,0 +1,35 @@
+# File: .github/workflows/terraform.yml
+# Version: 0.1.0
+# Date: 2026-08-04
+# Purpose: Validates the GA-Server Terraform configuration without applying infrastructure.
+
+name: Terraform
+
+on:
+  pull_request:
+    paths:
+      - "deploy/gcp/terraform/**"
+      - ".github/workflows/terraform.yml"
+  push:
+    branches: ["main", "agent/**", "codex/**"]
+    paths:
+      - "deploy/gcp/terraform/**"
+      - ".github/workflows/terraform.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: deploy/gcp/terraform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.10.5"
+      - run: terraform fmt -check -recursive
+      - run: terraform init -backend=false
+      - run: terraform validate
