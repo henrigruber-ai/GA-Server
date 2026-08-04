@@ -1,11 +1,25 @@
 <!--
 File: CHANGELOG.md
-Version: 0.1.1
+Version: 0.1.2
 Date: 2026-08-04
 Purpose: Records user-visible changes by semantic version.
 -->
 
 # Versionshistorie
+
+## 0.1.2 – 2026-08-04
+
+- GCP-Infrastruktur an das eigenständige GHCR-Deployment aus
+  `deploy/production` angepasst.
+- Repository-Checkout, lokales Produktions-Build und GCP-Compose-Override von
+  der VM entfernt.
+- Vorhandene GCP-Ressourcen können nun explizit referenziert oder kontrolliert
+  in Terraform importiert werden; neue Ressourcen benötigen eigene
+  Aktivierungsschalter.
+- Idempotenten Bootstrap und alle persistenten Datenpfade unter
+  `/srv/ga-server` vereinheitlicht.
+- Terraform-, TFLint-, ShellCheck- und Secret-Prüfungen für die
+  Infrastruktur-Pipeline erweitert.
 
 ## 0.1.1 – 2026-08-04
 

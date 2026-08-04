@@ -1,5 +1,5 @@
 # File: Dockerfile
-# Version: 0.1.1
+# Version: 0.1.2
 # Date: 2026-08-04
 # Purpose: Builds the non-root GA-Server production container.
 

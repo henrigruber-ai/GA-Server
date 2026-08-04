@@ -1,7 +1,7 @@
 # File: deploy/gcp/terraform/main.tf
-# Version: 0.1.0
+# Version: 0.1.2
 # Date: 2026-08-04
-# Purpose: Creates the production-ready GCP foundation for GA-Server.
+# Purpose: Safely creates or references explicitly selected GA-Server GCP resources.
 
 provider "google" {
   project = var.project_id
@@ -10,18 +10,39 @@ provider "google" {
 }
 
 locals {
-  name_prefix      = "ga-server-${var.environment}"
-  backup_bucket    = coalesce(var.backup_bucket_name, "${var.project_id}-ga-server-backups")
-  data_device_name = "ga-data"
+  network_name = var.create_network ? var.network_name : var.existing_network_name
+  subnetwork_name = (
+    var.create_subnetwork ? var.subnetwork_name : var.existing_subnetwork_name
+  )
+  static_ip_name = (
+    var.create_static_ip ? var.static_ip_name : var.existing_static_ip_name
+  )
+  static_ip_address = (
+    var.create_static_ip ? google_compute_address.public[0].address : var.existing_static_ip_address
+  )
+  service_account_email = (
+    var.create_service_account
+    ? google_service_account.vm[0].email
+    : var.existing_service_account_email
+  )
+  mqtt_secret_name = (
+    var.create_mqtt_secret ? var.mqtt_secret_name : var.existing_mqtt_secret_name
+  )
+  backup_bucket_name = (
+    var.create_backup_bucket ? var.backup_bucket_name : var.existing_backup_bucket_name
+  )
+  data_disk_name = (
+    var.create_data_disk ? var.data_disk_name : var.existing_data_disk_name
+  )
+  instance_output_name = (
+    var.create_instance ? var.instance_name : var.existing_instance_name
+  )
   common_labels = {
     application = "ga-server"
-    environment = var.environment
+    environment = "production"
     managed_by  = "terraform"
   }
-}
-
-resource "google_project_service" "required" {
-  for_each = toset([
+  required_services = toset([
     "compute.googleapis.com",
     "iam.googleapis.com",
     "logging.googleapis.com",
@@ -29,6 +50,101 @@ resource "google_project_service" "required" {
     "secretmanager.googleapis.com",
     "storage.googleapis.com",
   ])
+}
+
+check "explicit_resource_selection" {
+  assert {
+    condition     = local.network_name != null
+    error_message = "Set network_name when create_network=true, otherwise existing_network_name."
+  }
+
+  assert {
+    condition     = local.subnetwork_name != null
+    error_message = "Set subnetwork_name when create_subnetwork=true, otherwise existing_subnetwork_name."
+  }
+
+  assert {
+    condition     = !var.create_subnetwork || var.subnet_cidr != null
+    error_message = "subnet_cidr is required when create_subnetwork=true."
+  }
+
+  assert {
+    condition = (
+      !var.create_static_ip ||
+      (var.static_ip_name != null && var.static_ip_name != "")
+    )
+    error_message = "static_ip_name is required when create_static_ip=true."
+  }
+
+  assert {
+    condition = (
+      !var.create_service_account ||
+      (var.service_account_id != null && var.service_account_id != "")
+    )
+    error_message = "service_account_id is required when create_service_account=true."
+  }
+
+  assert {
+    condition = (
+      !var.create_firewall_rules ||
+      (
+        var.public_firewall_rule_name != null &&
+        var.iap_firewall_rule_name != null
+      )
+    )
+    error_message = "Both firewall rule names are required when create_firewall_rules=true."
+  }
+
+  assert {
+    condition = (
+      !var.create_mqtt_secret ||
+      (var.mqtt_secret_name != null && var.mqtt_secret_name != "")
+    )
+    error_message = "mqtt_secret_name is required when create_mqtt_secret=true."
+  }
+
+  assert {
+    condition = (
+      !var.enable_gcs_backups ||
+      (var.create_backup_bucket ? var.backup_bucket_name != null : var.existing_backup_bucket_name != null)
+    )
+    error_message = "Select a new or existing backup bucket when enable_gcs_backups=true."
+  }
+
+  assert {
+    condition     = !var.create_backup_bucket || var.enable_gcs_backups
+    error_message = "create_backup_bucket requires enable_gcs_backups=true."
+  }
+
+  assert {
+    condition = (
+      !var.create_snapshot_policy ||
+      (
+        var.snapshot_policy_name != null &&
+        local.data_disk_name != null
+      )
+    )
+    error_message = "snapshot_policy_name and a selected data disk are required."
+  }
+
+  assert {
+    condition = (
+      !var.create_instance ||
+      (
+        var.instance_name != null &&
+        local.data_disk_name != null &&
+        local.static_ip_address != null &&
+        var.public_base_url != null &&
+        var.mqtt_public_host != null &&
+        var.acme_email != null
+      )
+    )
+    error_message = "A managed VM requires explicit instance, disk, IP, public URL, MQTT host and ACME email values."
+  }
+}
+
+resource "google_project_service" "required" {
+  for_each = var.manage_project_services ? local.required_services : toset([])
 
   project            = var.project_id
   service            = each.value
@@ -36,7 +152,9 @@ resource "google_project_service" "required" {
 }
 
 resource "google_compute_network" "main" {
-  name                    = "${local.name_prefix}-vpc"
+  count = var.create_network ? 1 : 0
+
+  name                    = var.network_name
   auto_create_subnetworks = false
   routing_mode            = "REGIONAL"
 
@@ -44,15 +162,21 @@ resource "google_compute_network" "main" {
 }
 
 resource "google_compute_subnetwork" "main" {
-  name                     = "${local.name_prefix}-subnet"
+  count = var.create_subnetwork ? 1 : 0
+
+  name                     = var.subnetwork_name
   region                   = var.region
-  network                  = google_compute_network.main.id
+  network                  = local.network_name
   ip_cidr_range            = var.subnet_cidr
   private_ip_google_access = true
+
+  depends_on = [google_compute_network.main]
 }
 
 resource "google_compute_address" "public" {
-  name         = "${local.name_prefix}-public-ip"
+  count = var.create_static_ip ? 1 : 0
+
+  name         = var.static_ip_name
   region       = var.region
   address_type = "EXTERNAL"
   network_tier = "PREMIUM"
@@ -60,33 +184,54 @@ resource "google_compute_address" "public" {
   depends_on = [google_project_service.required]
 }
 
+resource "google_service_account" "vm" {
+  count = var.create_service_account ? 1 : 0
+
+  account_id   = var.service_account_id
+  display_name = "GA-Server production VM"
+  description  = "Least-privilege runtime identity for GA-Server."
+
+  depends_on = [google_project_service.required]
+}
+
 resource "google_compute_firewall" "public_services" {
-  name      = "${local.name_prefix}-allow-public"
-  network   = google_compute_network.main.name
+  count = var.create_firewall_rules ? 1 : 0
+
+  name      = var.public_firewall_rule_name
+  network   = local.network_name
   direction = "INGRESS"
   priority  = 1000
 
-  source_ranges = ["0.0.0.0/0"]
-  target_tags   = ["ga-server-public"]
+  source_ranges           = ["0.0.0.0/0"]
+  target_service_accounts = [local.service_account_email]
 
   allow {
     protocol = "tcp"
     ports    = ["80", "443", "8883"]
   }
 
+  allow {
+    protocol = "udp"
+    ports    = ["443"]
+  }
+
   log_config {
     metadata = "INCLUDE_ALL_METADATA"
   }
+
+  depends_on = [google_compute_network.main, google_service_account.vm]
 }
 
 resource "google_compute_firewall" "iap_ssh" {
-  name      = "${local.name_prefix}-allow-iap-ssh"
-  network   = google_compute_network.main.name
+  count = var.create_firewall_rules ? 1 : 0
+
+  name      = var.iap_firewall_rule_name
+  network   = local.network_name
   direction = "INGRESS"
   priority  = 1000
 
-  source_ranges = ["35.235.240.0/20"]
-  target_tags   = ["ga-server-iap"]
+  source_ranges           = ["35.235.240.0/20"]
+  target_service_accounts = [local.service_account_email]
 
   allow {
     protocol = "tcp"
@@ -96,30 +241,28 @@ resource "google_compute_firewall" "iap_ssh" {
   log_config {
     metadata = "INCLUDE_ALL_METADATA"
   }
-}
 
-resource "google_service_account" "vm" {
-  account_id   = "${local.name_prefix}-vm"
-  display_name = "GA-Server ${var.environment} VM"
-  description  = "Least-privilege runtime identity for GA-Server."
-
-  depends_on = [google_project_service.required]
+  depends_on = [google_compute_network.main, google_service_account.vm]
 }
 
 resource "google_project_iam_member" "logging" {
+  count = var.manage_runtime_iam ? 1 : 0
+
   project = var.project_id
   role    = "roles/logging.logWriter"
-  member  = "serviceAccount:${google_service_account.vm.email}"
+  member  = "serviceAccount:${local.service_account_email}"
 }
 
 resource "google_project_iam_member" "monitoring" {
+  count = var.manage_runtime_iam ? 1 : 0
+
   project = var.project_id
   role    = "roles/monitoring.metricWriter"
-  member  = "serviceAccount:${google_service_account.vm.email}"
+  member  = "serviceAccount:${local.service_account_email}"
 }
 
 resource "google_project_iam_member" "admin_iap" {
-  for_each = var.admin_members
+  for_each = var.manage_admin_iam ? var.admin_members : toset([])
 
   project = var.project_id
   role    = "roles/iap.tunnelResourceAccessor"
@@ -127,7 +270,7 @@ resource "google_project_iam_member" "admin_iap" {
 }
 
 resource "google_project_iam_member" "admin_os_login" {
-  for_each = var.admin_members
+  for_each = var.manage_admin_iam ? var.admin_members : toset([])
 
   project = var.project_id
   role    = "roles/compute.osAdminLogin"
@@ -135,7 +278,9 @@ resource "google_project_iam_member" "admin_os_login" {
 }
 
 resource "google_secret_manager_secret" "mqtt_password" {
-  secret_id = "ga-mqtt-password"
+  count = var.create_mqtt_secret ? 1 : 0
+
+  secret_id = var.mqtt_secret_name
 
   replication {
     auto {}
@@ -147,14 +292,20 @@ resource "google_secret_manager_secret" "mqtt_password" {
 }
 
 resource "google_secret_manager_secret_iam_member" "vm_mqtt_password" {
+  count = var.manage_runtime_iam && local.mqtt_secret_name != null ? 1 : 0
+
   project   = var.project_id
-  secret_id = google_secret_manager_secret.mqtt_password.secret_id
+  secret_id = local.mqtt_secret_name
   role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_service_account.vm.email}"
+  member    = "serviceAccount:${local.service_account_email}"
+
+  depends_on = [google_secret_manager_secret.mqtt_password]
 }
 
 resource "google_storage_bucket" "backups" {
-  name                        = local.backup_bucket
+  count = var.create_backup_bucket ? 1 : 0
+
+  name                        = var.backup_bucket_name
   location                    = var.region
   storage_class               = "STANDARD"
   uniform_bucket_level_access = true
@@ -180,13 +331,19 @@ resource "google_storage_bucket" "backups" {
 }
 
 resource "google_storage_bucket_iam_member" "vm_backups" {
-  bucket = google_storage_bucket.backups.name
-  role   = "roles/storage.objectAdmin"
-  member = "serviceAccount:${google_service_account.vm.email}"
+  count = var.manage_runtime_iam && var.enable_gcs_backups ? 1 : 0
+
+  bucket = local.backup_bucket_name
+  role   = "roles/storage.objectUser"
+  member = "serviceAccount:${local.service_account_email}"
+
+  depends_on = [google_storage_bucket.backups]
 }
 
 resource "google_compute_disk" "data" {
-  name = "${local.name_prefix}-data"
+  count = var.create_data_disk ? 1 : 0
+
+  name = var.data_disk_name
   type = "pd-balanced"
   zone = var.zone
   size = var.data_disk_size_gb
@@ -197,7 +354,9 @@ resource "google_compute_disk" "data" {
 }
 
 resource "google_compute_resource_policy" "daily_snapshot" {
-  name   = "${local.name_prefix}-daily-snapshot"
+  count = var.create_snapshot_policy ? 1 : 0
+
+  name   = var.snapshot_policy_name
   region = var.region
 
   snapshot_schedule_policy {
@@ -224,17 +383,25 @@ resource "google_compute_resource_policy" "daily_snapshot" {
 }
 
 resource "google_compute_disk_resource_policy_attachment" "data_snapshot" {
-  name = google_compute_resource_policy.daily_snapshot.name
-  disk = google_compute_disk.data.name
+  count = var.create_snapshot_policy ? 1 : 0
+
+  name = google_compute_resource_policy.daily_snapshot[0].name
+  disk = local.data_disk_name
   zone = var.zone
+
+  depends_on = [google_compute_disk.data]
 }
 
 data "google_compute_image" "ubuntu" {
+  count = var.create_instance ? 1 : 0
+
   family  = "ubuntu-2404-lts-amd64"
   project = "ubuntu-os-cloud"
 }
 
 resource "google_compute_instance" "server" {
+  count = var.create_instance ? 1 : 0
+
   name                      = var.instance_name
   machine_type              = var.machine_type
   zone                      = var.zone
@@ -242,13 +409,12 @@ resource "google_compute_instance" "server" {
   deletion_protection       = var.deletion_protection
   can_ip_forward            = false
 
-  tags   = ["ga-server-public", "ga-server-iap"]
   labels = local.common_labels
 
   boot_disk {
     auto_delete = true
     initialize_params {
-      image  = data.google_compute_image.ubuntu.self_link
+      image  = data.google_compute_image.ubuntu[0].self_link
       size   = var.boot_disk_size_gb
       type   = "pd-balanced"
       labels = local.common_labels
@@ -256,17 +422,17 @@ resource "google_compute_instance" "server" {
   }
 
   attached_disk {
-    source      = google_compute_disk.data.id
-    device_name = local.data_device_name
+    source      = "projects/${var.project_id}/zones/${var.zone}/disks/${local.data_disk_name}"
+    device_name = var.data_disk_device_name
     mode        = "READ_WRITE"
   }
 
   network_interface {
-    subnetwork = google_compute_subnetwork.main.id
-    network_ip = cidrhost(var.subnet_cidr, 10)
+    subnetwork = local.subnetwork_name
+    network_ip = var.internal_ip
 
     access_config {
-      nat_ip       = google_compute_address.public.address
+      nat_ip       = local.static_ip_address
       network_tier = "PREMIUM"
     }
   }
@@ -278,13 +444,20 @@ resource "google_compute_instance" "server" {
   }
 
   metadata_startup_script = templatefile("${path.module}/startup.sh.tftpl", {
-    data_device_name = local.data_device_name
-    repository_url   = var.repository_url
-    repository_ref   = var.repository_ref
+    acme_email_b64          = base64encode(var.acme_email == null ? "" : var.acme_email)
+    allow_disk_format       = var.allow_data_disk_format
+    data_device_name_b64    = base64encode(var.data_disk_device_name)
+    deployment_base_url_b64 = base64encode(var.deployment_source_base_url)
+    deployment_ref_b64      = base64encode(var.deployment_source_ref)
+    image_tag_b64           = base64encode(var.image_tag)
+    mqtt_host_b64           = base64encode(var.mqtt_public_host == null ? "" : var.mqtt_public_host)
+    mqtt_secret_name_b64    = base64encode(local.mqtt_secret_name == null ? "" : local.mqtt_secret_name)
+    project_id_b64          = base64encode(var.project_id)
+    public_base_url_b64     = base64encode(var.public_base_url == null ? "" : var.public_base_url)
   })
 
   service_account {
-    email  = google_service_account.vm.email
+    email  = local.service_account_email
     scopes = ["https://www.googleapis.com/auth/cloud-platform"]
   }
 
@@ -301,10 +474,15 @@ resource "google_compute_instance" "server" {
   }
 
   depends_on = [
+    google_compute_address.public,
+    google_compute_disk.data,
     google_compute_disk_resource_policy_attachment.data_snapshot,
+    google_compute_firewall.iap_ssh,
+    google_compute_firewall.public_services,
     google_project_iam_member.logging,
     google_project_iam_member.monitoring,
     google_secret_manager_secret_iam_member.vm_mqtt_password,
+    google_service_account.vm,
     google_storage_bucket_iam_member.vm_backups,
   ]
 }

@@ -1,132 +1,252 @@
 <!--
 File: deploy/gcp/terraform/README.md
-Version: 0.1.0
+Version: 0.1.2
 Date: 2026-08-04
-Purpose: Describes the reproducible GCP infrastructure deployment for GA-Server.
+Purpose: Documents safe creation, reuse, import and planning of GCP resources.
 -->
 
-# GA-Server auf GCP mit Terraform
+# Terraform für GA-Server auf GCP
 
-Diese Konfiguration erstellt die Infrastruktur, startet die Anwendung aber bewusst
-noch nicht mit Platzhalter-Secrets oder fehlenden MQTT-Zertifikaten.
+Diese Konfiguration verwaltet ausschließlich die ausdrücklich aktivierten
+Ressourcen im Projekt `gruber-ga-server-prod`. Alle `create_*`- und
+`manage_*`-Schalter sind standardmäßig `false`. Dadurch plant die
+Beispielkonfiguration keine zweite VPC, kein zweites Servicekonto und keine
+Ressourcen mit automatisch erfundenen Namen wie `ga-server-prod-vpc`,
+`ga-server-prod-subnet` oder `ga-server-prod-vm`.
 
-## Erstellte Ressourcen
+Terraform enthält keine Secret-Werte. Ein `plan` oder `import` verändert keine
+GCP-Ressource; nur ein späteres, separat freigegebenes `apply` könnte Änderungen
+ausführen.
 
-- eigene VPC und eigenes Subnetz in `europe-west3`
-- Compute-Engine-VM `ga-server-01` mit Ubuntu 24.04 LTS
-- statische externe IPv4-Adresse
-- ausschließlich öffentliche Ports 80, 443 und 8883
-- SSH nur über IAP aus `35.235.240.0/20`
-- separate `pd-balanced`-Datendisk mit täglichem Snapshot
-- privater GCS-Backup-Bucket mit Public Access Prevention und Lifecycle
-- Secret-Manager-Secret `ga-mqtt-password` ohne im Terraform-State gespeicherten Secret-Wert
-- dediziertes VM-Servicekonto mit minimalen Laufzeitrechten
-- OS Login und Shielded VM
+## Steuerungsmodell
 
-## Voraussetzungen
+Für jede Ressourcengruppe gilt genau eines der beiden Modelle:
 
-- vorhandenes GCP-Projekt mit aktivierter Abrechnung
-- Berechtigung zum Aktivieren von APIs und Erstellen der Ressourcen
-- Terraform 1.6 oder neuer
-- zwei später gesetzte DNS-A-Records:
-  `strom.gruber-automation.de` und `mqtt.strom.gruber-automation.de`
+- `create_*=false`: vorhandenen Namen beziehungsweise vorhandene IP direkt
+  referenzieren; Terraform verwaltet diese Ressource nicht.
+- `create_*=true`: die Ressource mit explizitem Namen neu anlegen oder eine
+  bereits vorhandene Ressource zuerst an dieselbe Terraform-Adresse importieren.
 
-## Infrastruktur anlegen
+IAM- und API-Verwaltung sind zusätzlich über `manage_runtime_iam`,
+`manage_admin_iam` und `manage_project_services` abgeschaltet. Vorhandene
+manuelle Bindings werden dadurch nicht ungeprüft dupliziert.
+
+Bekannte Werte sind vorbelegt:
+
+```hcl
+project_id                       = "gruber-ga-server-prod"
+existing_network_name            = "ga-server-vpc"
+existing_service_account_email   = "ga-server-vm@gruber-ga-server-prod.iam.gserviceaccount.com"
+```
+
+Alle noch unbekannten Namen müssen als `<...>` ersetzt werden.
+
+## Teilweise vorhandene Infrastruktur sicher planen
 
 ```bash
 cd deploy/gcp/terraform
 cp terraform.tfvars.example terraform.tfvars
 ```
 
-In `terraform.tfvars` mindestens `project_id` und `admin_members` ersetzen.
-Während dieser gestapelten PR-Phase bleibt `repository_ref` auf
-`agent/gcp-infrastructure`; nach dem Merge wird ein Release-Tag verwendet.
+Zuerst die unbekannten Werte ausschließlich lesend ermitteln:
+
+```bash
+gcloud compute networks list --project=gruber-ga-server-prod
+gcloud compute networks subnets list --project=gruber-ga-server-prod
+gcloud compute addresses list --project=gruber-ga-server-prod
+gcloud compute instances list --project=gruber-ga-server-prod
+gcloud compute disks list --project=gruber-ga-server-prod
+gcloud secrets list --project=gruber-ga-server-prod
+gcloud storage buckets list --project=gruber-ga-server-prod
+```
+
+Danach `<ZONE>`, `<SUBNET_NAME>`, `<STATIC_IP_NAME>`,
+`<STATIC_IP_ADDRESS>`, `<VM_NAME>`, `<DATA_DISK_NAME>` und gegebenenfalls
+Secret- oder Bucket-Namen ersetzen. Die Schalter bleiben `false`:
 
 ```bash
 terraform init
-terraform fmt -recursive
+terraform fmt -check -recursive
 terraform validate
-terraform plan -out=ga-server.tfplan
-terraform apply ga-server.tfplan
-terraform output
+terraform plan
 ```
 
-Der öffentliche IP-Wert aus `terraform output public_ip` wird anschließend für
-beide DNS-A-Records verwendet. Die VM startet das Compose-System noch nicht,
-sondern installiert Docker, bindet die Datendisk unter `/srv/ga-data` ein und
-checkt das Repository nach `/opt/ga-server` aus.
+Der Plan darf keine Ressourcenaktionen enthalten (`0 to add, 0 to change,
+0 to destroy`). Bei einem noch leeren State können ausschließlich neue
+Output-Werte angezeigt werden. Er darf insbesondere keine parallele VPC, kein
+zweites Servicekonto, keine VM und keine Datendisk erzeugen. Abweichungen
+werden untersucht; es folgt kein automatisches Apply.
 
-## MQTT-Secret hinterlegen
+## Vollständig neue Infrastruktur
 
-Der Secret-Wert wird absichtlich separat eingespielt, damit er nicht in
-`terraform.tfstate` landet:
+Für eine neue Umgebung werden nur die tatsächlich gewünschten Gruppen
+aktiviert. Ressourcennamen sind bewusst Pflichtangaben:
+
+```hcl
+create_network = true
+network_name   = "<NEW_VPC_NAME>"
+
+create_subnetwork = true
+subnetwork_name   = "<NEW_SUBNET_NAME>"
+subnet_cidr       = "<NEW_SUBNET_CIDR>"
+
+create_service_account = true
+service_account_id     = "<NEW_SERVICE_ACCOUNT_ID>"
+
+create_static_ip = true
+static_ip_name   = "<NEW_STATIC_IP_NAME>"
+
+create_firewall_rules      = true
+public_firewall_rule_name  = "<PUBLIC_FIREWALL_RULE_NAME>"
+iap_firewall_rule_name     = "<IAP_FIREWALL_RULE_NAME>"
+
+create_data_disk       = true
+data_disk_name         = "<NEW_DATA_DISK_NAME>"
+allow_data_disk_format = true
+
+create_snapshot_policy = true
+snapshot_policy_name   = "<NEW_SNAPSHOT_POLICY_NAME>"
+
+create_mqtt_secret = true
+mqtt_secret_name   = "<MQTT_SECRET_NAME>"
+
+create_instance = true
+instance_name   = "<NEW_VM_NAME>"
+
+manage_project_services = true
+manage_runtime_iam      = true
+manage_admin_iam        = true
+admin_members           = ["user:<ADMIN_EMAIL>"]
+
+public_base_url  = "https://<PUBLIC_HOSTNAME>"
+mqtt_public_host = "<MQTT_HOSTNAME>"
+acme_email       = "<ACME_EMAIL>"
+```
+
+Ein neuer GCS-Bucket ist optional und benötigt einen global eindeutigen,
+expliziten Namen:
+
+```hcl
+enable_gcs_backups  = true
+create_backup_bucket = true
+backup_bucket_name   = "<GLOBALLY_UNIQUE_BUCKET_NAME>"
+```
+
+`allow_data_disk_format=true` ist nur für eine nachweislich neue, leere Disk
+zulässig. Bei vorhandenen oder importierten Disks bleibt der Wert `false`.
+
+## Vorhandene Ressourcen importieren
+
+Ein Import nimmt eine vorhandene Ressource nur in den Terraform-State auf. Er
+ändert, startet, stoppt oder löscht sie nicht. Vor jedem Import:
+
+1. Ressource mit den obigen `gcloud ... list/describe`-Befehlen identifizieren.
+2. Den zugehörigen `create_*`-Schalter auf `true` setzen und alle Attribute an
+   die reale Ressource angleichen.
+3. Remote-State beziehungsweise lokalen State sichern.
+4. Genau eine der folgenden Adressen importieren.
 
 ```bash
-printf '%s' '<starkes-internes-mqtt-passwort>' \
-  | gcloud secrets versions add ga-mqtt-password \
-      --project='<projekt-id>' \
-      --data-file=-
+terraform import \
+  'google_compute_network.main[0]' \
+  'projects/gruber-ga-server-prod/global/networks/<VPC_NAME>'
+
+terraform import \
+  'google_compute_subnetwork.main[0]' \
+  'projects/gruber-ga-server-prod/regions/<REGION>/subnetworks/<SUBNET_NAME>'
+
+terraform import \
+  'google_compute_address.public[0]' \
+  'projects/gruber-ga-server-prod/regions/<REGION>/addresses/<STATIC_IP_NAME>'
+
+terraform import \
+  'google_service_account.vm[0]' \
+  'projects/gruber-ga-server-prod/serviceAccounts/<SERVICE_ACCOUNT_EMAIL>'
+
+terraform import \
+  'google_compute_firewall.public_services[0]' \
+  'projects/gruber-ga-server-prod/global/firewalls/<PUBLIC_FIREWALL_RULE_NAME>'
+
+terraform import \
+  'google_compute_firewall.iap_ssh[0]' \
+  'projects/gruber-ga-server-prod/global/firewalls/<IAP_FIREWALL_RULE_NAME>'
+
+terraform import \
+  'google_secret_manager_secret.mqtt_password[0]' \
+  'projects/gruber-ga-server-prod/secrets/<MQTT_SECRET_NAME>'
+
+terraform import \
+  'google_storage_bucket.backups[0]' \
+  'gruber-ga-server-prod/<BACKUP_BUCKET_NAME>'
+
+terraform import \
+  'google_compute_disk.data[0]' \
+  'projects/gruber-ga-server-prod/zones/<ZONE>/disks/<DATA_DISK_NAME>'
+
+terraform import \
+  'google_compute_resource_policy.daily_snapshot[0]' \
+  'projects/gruber-ga-server-prod/regions/<REGION>/resourcePolicies/<SNAPSHOT_POLICY_NAME>'
+
+terraform import \
+  'google_compute_disk_resource_policy_attachment.data_snapshot[0]' \
+  'projects/gruber-ga-server-prod/zones/<ZONE>/disks/<DATA_DISK_NAME>/<SNAPSHOT_POLICY_NAME>'
+
+terraform import \
+  'google_compute_instance.server[0]' \
+  'projects/gruber-ga-server-prod/zones/<ZONE>/instances/<VM_NAME>'
 ```
 
-## Verbindung zur VM
+Nicht jede vorhandene Ressource muss importiert werden. VPC, Subnetz,
+Servicekonto, IP, Disk oder VM können mit `create_*=false` weiter manuell
+verwaltet und nur referenziert werden.
+
+Nach jedem Import:
 
 ```bash
-gcloud compute ssh ga-server-01 \
-  --project='<projekt-id>' \
-  --zone='europe-west3-a' \
-  --tunnel-through-iap
+terraform state show '<TERRAFORM_ADDRESS>'
+terraform plan
 ```
 
-Der exakte Befehl steht auch im Terraform-Output `iap_ssh_command`.
+Ein sauberer Plan ist leer. Bei einer importierten VM sind Boot-Image,
+Maschinentyp, Disk-Anbindung, Netzwerk, Metadaten, Servicekonto, Shielded-VM-
+Optionen und Löschschutz besonders sorgfältig abzugleichen. Ein Plan mit
+`replace`, `destroy`, Stoppen der VM oder unerwarteten Änderungen wird nicht
+angewendet. Erst nach menschlicher Prüfung und separater Freigabe wäre ein
+`apply` zulässig; diese Anleitung führt keines aus.
 
-## Laufzeit vorbereiten
+Die verwendeten Import-ID-Formate entsprechen der offiziellen Dokumentation
+des [Google-Terraform-Providers](https://registry.terraform.io/providers/hashicorp/google/latest/docs).
 
-Auf der VM müssen vor dem ersten Start diese Dateien vorhanden sein:
+## Bootstrap-Konfiguration
+
+Eine Terraform-verwaltete VM lädt `deploy/gcp/bootstrap.sh` aus
+`deployment_source_ref` und anschließend nur diese Dateien:
 
 ```text
-/srv/ga-data/mqtt/certs/ca.crt
-/srv/ga-data/mqtt/certs/server.crt
-/srv/ga-data/mqtt/certs/server.key
-/srv/ga-data/mqtt/passwords
+deploy/production/docker-compose.yml
+deploy/production/Caddyfile
+deploy/production/mosquitto.conf
+deploy/production/update.sh
+deploy/production/.env.example
 ```
 
-Das Serverzertifikat muss `mqtt.strom.gruber-automation.de` als SAN enthalten.
-Danach:
+Für Produktion wird ein unveränderlicher Release-Tag oder vollständiger
+Commit-SHA verwendet. `v0.1.2` ist die Konfigurationsversion; `image_tag`
+steuert unabhängig davon das GHCR-Image. Es gibt weder Repository-Checkout noch
+lokalen Docker-Build.
 
-```bash
-cd /opt/ga-server
-sudo ACME_EMAIL='admin@gruber-automation.de' \
-  ./deploy/gcp/prepare-runtime.sh
+Beim Import einer laufenden VM kann eine Änderung von
+`metadata_startup_script` einen relevanten Plan erzeugen. Dieser Plan wird
+nicht blind angewendet. Alternativ bleibt `create_instance=false` und der
+Betreiber führt den dokumentierten Bootstrap kontrolliert per IAP aus.
+
+## Verbotene Befehle in diesem Arbeitsablauf
+
+```text
+terraform apply
+terraform destroy
+terraform import (ohne explizite Betreiberentscheidung)
 ```
 
-Das Skript liest `ga-mqtt-password` über die VM-Identität aus Secret Manager,
-erstellt die Produktionskonfiguration, prüft die Zertifikate und startet den
-Compose-Stack mit persistenten Bind-Mounts auf der Datendisk.
-
-Anschließend wird der erste Administrator interaktiv angelegt:
-
-```bash
-docker compose \
-  -f docker-compose.yml \
-  -f deploy/gcp/docker-compose.gcp.yml \
-  exec ga-server python -m app.cli create-admin --username betreiber
-```
-
-## Prüfung
-
-```bash
-curl -fsS https://strom.gruber-automation.de/health/live
-curl -fsS https://strom.gruber-automation.de/health/ready
-docker compose \
-  -f docker-compose.yml \
-  -f deploy/gcp/docker-compose.gcp.yml \
-  ps
-```
-
-## Wichtige Sicherheitsentscheidung
-
-Port 22 ist nicht öffentlich freigegeben. Terraform erteilt den in
-`admin_members` eingetragenen Identitäten IAP-Tunnel- und OS-Admin-Login-Rechte.
-Port 1883 bleibt ausschließlich im Docker-Netz. Der GCS-Bucket blockiert
-öffentlichen Zugriff. Secret-Werte werden weder committed noch über
-Terraform-Variablen verarbeitet.
+CI führt ausschließlich Formatierung, `init -backend=false`, Validierung,
+TFLint, ShellCheck und die Secret-Mustersuche aus.

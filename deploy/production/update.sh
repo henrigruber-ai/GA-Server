@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 # File: deploy/production/update.sh
-# Version: 0.1.1
+# Version: 0.1.2
 # Date: 2026-08-04
 # Purpose: Pulls and restarts the production stack without touching persistent data.
 
@@ -9,6 +9,7 @@ set -eu
 cd "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 
 echo "GA-Server: pulling configured images..."
+docker compose config --quiet
 docker compose pull
 
 echo "GA-Server: applying the updated stack..."

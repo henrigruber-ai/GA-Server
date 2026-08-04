@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # File: scripts/test-production-stack.sh
-# Version: 0.1.1
+# Version: 0.1.2
 # Date: 2026-08-04
 # Purpose: Smoke-tests the production Compose stack with temporary credentials and certificates.
 

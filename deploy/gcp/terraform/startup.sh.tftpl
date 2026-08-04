@@ -1,73 +1,46 @@
 #!/usr/bin/env bash
 # File: deploy/gcp/terraform/startup.sh.tftpl
-# Version: 0.1.0
+# Version: 0.1.2
 # Date: 2026-08-04
-# Purpose: Installs Docker, mounts the persistent disk and stages the GA-Server repository.
+# Purpose: Fetches and runs the versioned idempotent GCP bootstrap without cloning source.
 
 set -Eeuo pipefail
-exec > >(tee -a /var/log/ga-server-bootstrap.log | logger -t ga-server-bootstrap -s 2>/dev/console) 2>&1
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y ca-certificates curl git gnupg jq e2fsprogs
+apt-get install -y ca-certificates curl
 
-install -m 0755 -d /etc/apt/keyrings
-if [[ ! -f /etc/apt/keyrings/docker.gpg ]]; then
-  curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
-    | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-  chmod a+r /etc/apt/keyrings/docker.gpg
-fi
+decode() {
+  printf '%s' "$1" | base64 --decode
+}
 
-. /etc/os-release
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $${VERSION_CODENAME} stable" \
-  > /etc/apt/sources.list.d/docker.list
-apt-get update
-apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-systemctl enable --now docker
+export GA_PROJECT_ID
+export GA_DATA_DEVICE_NAME
+export GA_ALLOW_DATA_DISK_FORMAT
+export GA_DEPLOYMENT_SOURCE_BASE_URL
+export GA_DEPLOYMENT_SOURCE_REF
+export GA_SERVER_IMAGE_TAG
+export GA_MQTT_SECRET_NAME
+export GA_PUBLIC_BASE_URL
+export GA_MQTT_PUBLIC_HOST
+export GA_ACME_EMAIL
 
-DEVICE="/dev/disk/by-id/google-${data_device_name}"
-for _ in $(seq 1 60); do
-  [[ -b "$${DEVICE}" ]] && break
-  sleep 2
-done
-[[ -b "$${DEVICE}" ]]
+GA_PROJECT_ID="$(decode '${project_id_b64}')"
+GA_DATA_DEVICE_NAME="$(decode '${data_device_name_b64}')"
+GA_ALLOW_DATA_DISK_FORMAT="${allow_disk_format}"
+GA_DEPLOYMENT_SOURCE_BASE_URL="$(decode '${deployment_base_url_b64}')"
+GA_DEPLOYMENT_SOURCE_REF="$(decode '${deployment_ref_b64}')"
+GA_SERVER_IMAGE_TAG="$(decode '${image_tag_b64}')"
+GA_MQTT_SECRET_NAME="$(decode '${mqtt_secret_name_b64}')"
+GA_PUBLIC_BASE_URL="$(decode '${public_base_url_b64}')"
+GA_MQTT_PUBLIC_HOST="$(decode '${mqtt_host_b64}')"
+GA_ACME_EMAIL="$(decode '${acme_email_b64}')"
 
-if ! blkid "$${DEVICE}" >/dev/null 2>&1; then
-  mkfs.ext4 -F -L ga-data "$${DEVICE}"
-fi
+bootstrap_url="$${GA_DEPLOYMENT_SOURCE_BASE_URL}/$${GA_DEPLOYMENT_SOURCE_REF}/deploy/gcp/bootstrap.sh"
+bootstrap_tmp="$(mktemp)"
+trap 'rm -f "$${bootstrap_tmp}"' EXIT
 
-install -d -m 0755 /srv/ga-data
-UUID="$(blkid -s UUID -o value "$${DEVICE}")"
-if ! grep -q "UUID=$${UUID}" /etc/fstab; then
-  echo "UUID=$${UUID} /srv/ga-data ext4 defaults,nofail,discard 0 2" >> /etc/fstab
-fi
-mount /srv/ga-data || mount -a
+curl -fsSL --retry 5 --retry-delay 2 "$${bootstrap_url}" -o "$${bootstrap_tmp}"
+install -o root -g root -m 0755 "$${bootstrap_tmp}" /usr/local/sbin/ga-server-bootstrap
 
-install -d -m 0750 \
-  /srv/ga-data/app \
-  /srv/ga-data/backups \
-  /srv/ga-data/caddy/data \
-  /srv/ga-data/caddy/config \
-  /srv/ga-data/mosquitto/data \
-  /srv/ga-data/mosquitto/log \
-  /srv/ga-data/mqtt/certs \
-  /srv/ga-data/secrets
-chown -R 10001:10001 /srv/ga-data/app
-chown -R 1883:1883 /srv/ga-data/mosquitto
-
-if [[ ! -d /opt/ga-server/.git ]]; then
-  rm -rf /opt/ga-server
-  git clone --branch "${repository_ref}" --single-branch "${repository_url}" /opt/ga-server
-else
-  git -C /opt/ga-server fetch --prune origin
-  git -C /opt/ga-server checkout "${repository_ref}"
-  git -C /opt/ga-server pull --ff-only origin "${repository_ref}"
-fi
-
-cat > /etc/profile.d/ga-server.sh <<'PROFILE'
-export GA_SERVER_HOME=/opt/ga-server
-alias ga-compose='docker compose -f /opt/ga-server/docker-compose.yml -f /opt/ga-server/deploy/gcp/docker-compose.gcp.yml'
-PROFILE
-chmod 0644 /etc/profile.d/ga-server.sh
-
-touch /var/lib/ga-server-bootstrap-complete
+/usr/local/sbin/ga-server-bootstrap

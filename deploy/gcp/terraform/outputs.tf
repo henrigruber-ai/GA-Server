@@ -1,42 +1,48 @@
 # File: deploy/gcp/terraform/outputs.tf
-# Version: 0.1.0
+# Version: 0.1.2
 # Date: 2026-08-04
-# Purpose: Exposes deployment values needed for DNS, SSH and operations.
+# Purpose: Exposes selected resource values without assuming unknown names.
 
-output "instance_name" {
-  description = "Compute Engine instance name."
-  value       = google_compute_instance.server.name
+output "resource_selection" {
+  description = "New or existing resources selected by this configuration."
+  value = {
+    network                 = local.network_name
+    subnetwork              = local.subnetwork_name
+    service_account_email   = local.service_account_email
+    static_ip_name          = local.static_ip_name
+    data_disk_name          = local.data_disk_name
+    instance_name           = local.instance_output_name
+    mqtt_secret_name        = local.mqtt_secret_name
+    backup_bucket_name      = var.enable_gcs_backups ? local.backup_bucket_name : null
+    creates_network         = var.create_network
+    creates_subnetwork      = var.create_subnetwork
+    creates_service_account = var.create_service_account
+    creates_static_ip       = var.create_static_ip
+    creates_data_disk       = var.create_data_disk
+    creates_instance        = var.create_instance
+  }
 }
 
 output "public_ip" {
-  description = "Static public IPv4 address for both A records."
-  value       = google_compute_address.public.address
-}
-
-output "internal_ip" {
-  description = "Stable internal VM address."
-  value       = google_compute_instance.server.network_interface[0].network_ip
-}
-
-output "backup_bucket" {
-  description = "GCS bucket receiving application backups."
-  value       = google_storage_bucket.backups.name
-}
-
-output "mqtt_secret_name" {
-  description = "Secret Manager secret that stores the internal MQTT password."
-  value       = google_secret_manager_secret.mqtt_password.secret_id
+  description = "Selected static public IPv4 address, or null when it was not supplied."
+  value       = local.static_ip_address
 }
 
 output "iap_ssh_command" {
-  description = "IAP SSH command for the VM."
-  value       = "gcloud compute ssh ${google_compute_instance.server.name} --project=${var.project_id} --zone=${var.zone} --tunnel-through-iap"
+  description = "IAP SSH command when an instance name is selected."
+  value = local.instance_output_name == null ? null : (
+    "gcloud compute ssh ${local.instance_output_name} --project=${var.project_id} --zone=${var.zone} --tunnel-through-iap"
+  )
 }
 
 output "required_dns_records" {
-  description = "DNS records that must point to the reserved public IP."
-  value = {
-    "strom.gruber-automation.de"      = google_compute_address.public.address
-    "mqtt.strom.gruber-automation.de" = google_compute_address.public.address
-  }
+  description = "Manual DNS A records; Terraform does not change DNS."
+  value = (
+    local.static_ip_address != null &&
+    var.public_base_url != null &&
+    var.mqtt_public_host != null
+    ) ? {
+    (trimprefix(var.public_base_url, "https://")) = local.static_ip_address
+    (var.mqtt_public_host)                        = local.static_ip_address
+  } : {}
 }
