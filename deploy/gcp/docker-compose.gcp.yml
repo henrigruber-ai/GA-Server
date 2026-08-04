@@ -1,0 +1,27 @@
+# File: deploy/gcp/docker-compose.gcp.yml
+# Version: 0.1.0
+# Date: 2026-08-04
+# Purpose: Places all production state on the separately snapshotted GCP data disk.
+
+services:
+  ga-server:
+    volumes:
+      - /srv/ga-data/app:/data
+
+  mosquitto:
+    volumes:
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - /srv/ga-data/mqtt/passwords:/mosquitto/config/passwords:ro
+      - /srv/ga-data/mqtt/certs:/mosquitto/certs:ro
+      - /srv/ga-data/mosquitto/data:/mosquitto/data
+      - /srv/ga-data/mosquitto/log:/mosquitto/log
+
+  caddy:
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - /srv/ga-data/caddy/data:/data
+      - /srv/ga-data/caddy/config:/config
+
+secrets:
+  ga_mqtt_password:
+    file: /srv/ga-data/secrets/ga_mqtt_password
