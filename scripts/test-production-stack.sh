@@ -28,7 +28,13 @@ cleanup() {
   if [[ -f "$environment_file" ]]; then
     compose down --remove-orphans >/dev/null 2>&1 || true
   fi
-  rm -rf "$runtime_dir"
+  if ! rm -rf "$runtime_dir" 2>/dev/null; then
+    docker run --rm --user 0:0 \
+      -v "$host_runtime_dir:/cleanup" \
+      --entrypoint sh caddy:2.11.4-alpine \
+      -c 'chmod -R a+rwX /cleanup' >/dev/null 2>&1 || true
+    rm -rf "$runtime_dir"
+  fi
 }
 trap cleanup EXIT
 
