@@ -25,11 +25,11 @@ fi
 
 cd "${APP_DIR}"
 
-TOKEN="$(curl -fsS -H 'Metadata-Flavor: Google' \
+AUTH_BEARER="$(curl -fsS -H 'Metadata-Flavor: Google' \
   http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token \
   | jq -r '.access_token')"
 SECRET_JSON="$(curl -fsS \
-  -H "Authorization: Bearer ${TOKEN}" \
+  -H "Authorization: Bearer ${AUTH_BEARER}" \
   "https://secretmanager.googleapis.com/v1/projects/${PROJECT_ID}/secrets/${MQTT_SECRET_NAME}/versions/latest:access")"
 
 install -d -m 0750 /srv/ga-data/secrets
