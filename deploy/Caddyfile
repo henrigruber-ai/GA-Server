@@ -1,0 +1,23 @@
+# File: deploy/Caddyfile
+# Version: 0.1.0
+# Date: 2026-08-03
+# Purpose: Terminates public HTTPS and proxies HTTP/WebSocket traffic to GA-Server.
+
+{
+	email {$ACME_EMAIL}
+	admin 0.0.0.0:2019
+}
+
+strom.gruber-automation.de {
+	encode zstd gzip
+	reverse_proxy ga-server:8000
+	header {
+		-Server
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "same-origin"
+	}
+	log {
+		output stdout
+		format json
+	}
+}
