@@ -1,6 +1,6 @@
 <!--
 File: deploy/production/README.md
-Version: 0.1.2
+Version: 0.2.0
 Date: 2026-08-04
 Purpose: Describes image-only production installation, updates, rollback and persistence.
 -->
@@ -12,7 +12,7 @@ noch Repository-Checkout oder lokaler Docker-Build benötigt. Standardmäßig
 wird der feste Release-Stand geladen:
 
 ```text
-ghcr.io/henrigruber-ai/ga-server:0.1.2
+ghcr.io/henrigruber-ai/ga-server:0.2.0
 ```
 
 ## Deployment-Dateien ohne Repository beziehen
@@ -22,7 +22,7 @@ Für Produktion einen Release-Tag oder vollständigen Commit-SHA verwenden:
 ```bash
 install -d -m 0755 /opt/ga-server-production
 cd /opt/ga-server-production
-deployment_ref="v0.1.2"
+deployment_ref="v0.2.0"
 base_url="https://raw.githubusercontent.com/henrigruber-ai/GA-Server/${deployment_ref}/deploy/production"
 curl -fsSLO "$base_url/docker-compose.yml"
 curl -fsSLO "$base_url/Caddyfile"
@@ -152,7 +152,7 @@ Tag-Verhalten:
 - `latest`: beweglicher erfolgreicher Main-Stand.
 - `main`: ebenfalls beweglicher Main-Stand.
 - `sha-<commit>`: konkreter Commit, rückverfolgbar und für Rollback geeignet.
-- `0.1.2`: fester Release-Stand und Produktionsstandard.
+- `0.2.0`: fester Release-Stand und Produktionsstandard.
 
 Normale Image-Updates benötigen weder Terraform noch `git pull`.
 
@@ -191,7 +191,7 @@ unterschiedliche Zwecke. Restore regelmäßig getrennt von Produktion testen.
 Bei einem öffentlichen Paket ist keine Anmeldung nötig:
 
 ```bash
-docker pull ghcr.io/henrigruber-ai/ga-server:0.1.2
+docker pull ghcr.io/henrigruber-ai/ga-server:0.2.0
 ```
 
 Bei einem privaten Paket ein Token ausschließlich mit `read:packages` über

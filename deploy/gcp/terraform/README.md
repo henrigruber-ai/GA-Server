@@ -1,6 +1,6 @@
 <!--
 File: deploy/gcp/terraform/README.md
-Version: 0.1.2
+Version: 0.2.0
 Date: 2026-08-04
 Purpose: Documents safe creation, reuse, import and planning of GCP resources.
 -->
@@ -231,7 +231,7 @@ deploy/production/.env.example
 ```
 
 Für Produktion wird ein unveränderlicher Release-Tag oder vollständiger
-Commit-SHA verwendet. `v0.1.2` ist die Konfigurationsversion; `image_tag`
+Commit-SHA verwendet. `v0.2.0` ist die Konfigurationsversion; `image_tag`
 steuert unabhängig davon das GHCR-Image. Es gibt weder Repository-Checkout noch
 lokalen Docker-Build.
 

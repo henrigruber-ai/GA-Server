@@ -1,10 +1,11 @@
 """
 File: app/services/measurement.py
-Version: 0.1.0
-Date: 2026-08-03
+Version: 0.2.0
+Date: 2026-08-04
 Purpose: Defines validated in-memory measurement records shared across services.
 Changes:
 - 0.1.0: Initial implementation.
+- 0.2.0: Publishes the canonical set of technically available measurement series.
 """
 
 from __future__ import annotations
@@ -25,6 +26,12 @@ METRIC_KEYS = (
     "power_l3",
     "power_total",
 )
+
+SERIES_DEFINITIONS = {
+    "current": ("l1", "l2", "l3", "total"),
+    "voltage": ("l1", "l2", "l3"),
+    "power": ("l1", "l2", "l3", "total"),
+}
 
 
 @dataclass(frozen=True, slots=True)

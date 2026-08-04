@@ -1,38 +1,94 @@
 /*
 File: app/web/static/js/app.js
-Version: 0.1.0
-Date: 2026-08-03
-Purpose: Coordinates public devices, graph controls, live WebSocket updates, and authentication entry.
+Version: 0.2.0
+Date: 2026-08-04
+Purpose: Coordinates the hierarchical series legend, bundled history, raw live values, and auth.
 Changes:
 - 0.1.0: Initial implementation.
+- 0.2.0: Adds independent multi-series selection, persistent legend state, and raw live values.
 */
 
 (() => {
   "use strict";
 
+  const STORAGE_KEY = "ga.monitor.selection.v2";
+  const METRICS = {
+    current: { label: "Strom", unit: "A", phases: ["l1", "l2", "l3", "total"] },
+    voltage: { label: "Spannung", unit: "V", phases: ["l1", "l2", "l3"] },
+    power: { label: "Leistung", unit: "W", phases: ["l1", "l2", "l3", "total"] },
+  };
+  const PHASE_LABELS = { l1: "L1", l2: "L2", l3: "L3", total: "Gesamt" };
+  const ALL_SERIES = Object.entries(METRICS)
+    .flatMap(([metric, definition]) => definition.phases.map((phase) => `${metric}:${phase}`))
+    .join(",");
+  const saved = readSavedState();
   const state = {
     devices: [],
     latest: new Map(),
-    metric: localStorage.getItem("ga.metric") || "power",
-    phase: localStorage.getItem("ga.phase") || "total",
-    visible: new Set(JSON.parse(localStorage.getItem("ga.visibleDevices") || "[]")),
+    selected: new Set(saved?.selected || []),
+    expanded: new Set(saved?.expanded || []),
+    legendCollapsed: saved?.legendCollapsed === true,
+    hasSavedSelection: Boolean(saved),
+    visuals: new Map(),
     socket: null,
     reconnectDelay: 1000,
     reconnectTimer: null,
+    historyInFlight: null,
+    historyCursor: null,
+    historyTimer: null,
+    liveTimer: null,
+    destroyed: false,
   };
 
   const canvas = document.querySelector("#historyCanvas");
   const tooltip = document.querySelector("#tooltip");
-  const chart = new window.GAHistoryChart(canvas, tooltip);
-  const metricControls = document.querySelector("#metricControls");
-  const phaseControls = document.querySelector("#phaseControls");
+  const chart = new window.GAHistoryChart(canvas, tooltip, {
+    onZoomChange: (zoomed) => document.querySelector("#zoomReset").classList.toggle("hidden", !zoomed),
+  });
   const legend = document.querySelector("#deviceLegend");
+  const legendBody = document.querySelector("#legendBody");
   const legendRows = document.querySelector("#legendRows");
   const legendToggle = document.querySelector("#legendToggle");
   const menuButton = document.querySelector("#menuButton");
   const loginDialog = document.querySelector("#loginDialog");
   const loginForm = document.querySelector("#loginForm");
   const connectionBadge = document.querySelector("#connectionBadge");
+
+  function readSavedState() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY));
+      if (
+        parsed?.version !== 2 ||
+        !Array.isArray(parsed.selected) ||
+        !Array.isArray(parsed.expanded)
+      ) {
+        return null;
+      }
+      return {
+        selected: parsed.selected.filter((value) => typeof value === "string"),
+        expanded: parsed.expanded.filter((value) => typeof value === "string"),
+        legendCollapsed: parsed.legendCollapsed === true,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  function saveState() {
+    try {
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({
+          version: 2,
+          selected: [...state.selected],
+          expanded: [...state.expanded],
+          legendCollapsed: state.legendCollapsed,
+        }),
+      );
+    } catch {
+      // A disabled or full local storage must not make the monitor unusable.
+    }
+  }
 
   async function fetchJson(url, options = {}) {
     const response = await fetch(url, { credentials: "same-origin", ...options });
@@ -43,126 +99,306 @@ Changes:
     return response.json();
   }
 
-  async function loadDevices() {
-    state.devices = await fetchJson("/api/public/devices");
-    if (!state.visible.size) state.devices.forEach((device) => state.visible.add(device.id));
-    const existing = new Set(state.devices.map((device) => device.id));
-    state.visible = new Set([...state.visible].filter((id) => existing.has(id)));
-    renderLegend();
-    renderLiveCards();
-    chart.setVisibleDevices(state.visible);
+  function availableKeys(device) {
+    const catalog = Array.isArray(device.available_series)
+      ? device.available_series
+      : ALL_SERIES.split(",");
+    return catalog.map((item) => `${device.id}:${item}`);
   }
 
-  async function loadHistory() {
+  function defaultKeys(device) {
+    return ["l1", "l2", "l3"]
+      .map((phase) => `${device.id}:current:${phase}`)
+      .filter((key) => availableKeys(device).includes(key));
+  }
+
+  function buildVisuals() {
+    const usedHues = new Set();
+    const keys = state.devices.flatMap(availableKeys).sort();
+    state.visuals.clear();
+    keys.forEach((key) => {
+      let hue = hashString(key) % 360;
+      while (usedHues.has(hue)) hue = (hue + 47) % 360;
+      usedHues.add(hue);
+      const phase = key.split(":").at(-1);
+      const dash = {
+        l1: [],
+        l2: [8, 4],
+        l3: [2, 3],
+        total: [11, 3, 2, 3],
+      }[phase];
+      state.visuals.set(key, { color: `hsl(${hue} 78% 64%)`, dash });
+    });
+  }
+
+  function hashString(value) {
+    let hash = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+      hash ^= value.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return hash >>> 0;
+  }
+
+  async function loadDevices() {
+    state.devices = await fetchJson("/api/public/devices");
+    const valid = new Set(state.devices.flatMap(availableKeys));
+    state.selected = new Set([...state.selected].filter((key) => valid.has(key)));
+    state.expanded = new Set(
+      [...state.expanded].filter((key) =>
+        state.devices.some((device) => key === device.id || key.startsWith(`${device.id}:`)),
+      ),
+    );
+    if (!state.hasSavedSelection) {
+      state.devices.forEach((device) => {
+        defaultKeys(device).forEach((key) => state.selected.add(key));
+      });
+      state.hasSavedSelection = true;
+      saveState();
+    }
+    buildVisuals();
+    renderLegend();
+    updateChartSelection();
+  }
+
+  async function loadHistory({ force = false } = {}) {
+    if (document.hidden && !force) return;
+    if (state.historyInFlight) return state.historyInFlight;
     const query = new URLSearchParams({
-      metric: state.metric,
-      phase: state.phase,
+      series: ALL_SERIES,
       max_points: String(window.innerWidth < 700 ? 720 : 1440),
     });
-    const data = await fetchJson(`/api/public/history?${query}`);
-    chart.setSelection(state.metric, state.phase);
-    chart.setSeries(data.series || []);
+    if (state.historyCursor) {
+      query.set("from", new Date(state.historyCursor - 2 * 60_000).toISOString());
+    }
+    const request = fetchJson(`/api/public/history-batch?${query}`)
+      .then((data) => {
+        const series = (data.series || []).map((item) => ({
+          ...item,
+          ...state.visuals.get(item.key),
+        }));
+        if (state.historyCursor) chart.mergeSeries(series);
+        else chart.setSeries(series);
+        const cursor = new Date(data.to).getTime();
+        if (Number.isFinite(cursor)) state.historyCursor = cursor;
+        updateChartSelection();
+      })
+      .finally(() => {
+        state.historyInFlight = null;
+      });
+    state.historyInFlight = request;
+    return request;
+  }
+
+  function updateChartSelection() {
+    chart.setActiveSeries(state.selected);
+    const selectedCount = state.selected.size;
+    const warning = document.querySelector("#legendWarning");
+    warning.textContent =
+      selectedCount > 12 ? `${selectedCount} Kurven aktiv – die Darstellung kann dicht werden.` : "";
+    warning.classList.toggle("hidden", selectedCount <= 12);
+  }
+
+  function setCheckedState(checkbox, selectedCount, totalCount) {
+    checkbox.checked = totalCount > 0 && selectedCount === totalCount;
+    checkbox.indeterminate = selectedCount > 0 && selectedCount < totalCount;
+    checkbox.setAttribute(
+      "aria-checked",
+      checkbox.indeterminate ? "mixed" : String(checkbox.checked),
+    );
   }
 
   function renderLegend() {
     legendRows.replaceChildren();
     document.querySelector("#legendCount").textContent = String(state.devices.length);
-    state.devices.forEach((device) => {
-      const label = document.createElement("label");
-      label.className = "legend-row";
-      label.title = device.name;
-      const checkbox = document.createElement("input");
-      checkbox.type = "checkbox";
-      checkbox.checked = state.visible.has(device.id);
-      checkbox.addEventListener("change", () => {
-        if (checkbox.checked) state.visible.add(device.id);
-        else state.visible.delete(device.id);
-        localStorage.setItem("ga.visibleDevices", JSON.stringify([...state.visible]));
-        chart.setVisibleDevices(state.visible);
-        renderLiveCards();
-      });
-      const name = document.createElement("span");
-      name.className = "legend-name";
-      name.textContent = device.name + (device.has_data ? "" : " · keine Daten");
-      const indicator = document.createElement("span");
-      indicator.className = `device-state ${device.status}`;
-      indicator.title = device.status;
-      const color = document.createElement("span");
-      color.className = "legend-color";
-      color.style.backgroundColor = device.color;
-      name.prepend(color, " ");
-      label.append(checkbox, name, indicator);
-      legendRows.append(label);
+    state.devices.forEach((device) => legendRows.append(createDeviceGroup(device)));
+    applyLegendCollapsedState();
+    updateLiveValues();
+  }
+
+  function createDeviceGroup(device) {
+    const group = document.createElement("section");
+    group.className = "legend-device";
+    const header = document.createElement("div");
+    header.className = "legend-device-header";
+
+    const disclosure = createDisclosure(
+      `${device.name} ein- oder ausklappen`,
+      state.expanded.has(device.id),
+      () => toggleExpanded(device.id),
+    );
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.className = "legend-checkbox";
+    checkbox.setAttribute("aria-label", `Alle Standardreihen von ${device.name}`);
+    const deviceKeys = availableKeys(device);
+    setCheckedState(checkbox, deviceKeys.filter((key) => state.selected.has(key)).length, deviceKeys.length);
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) defaultKeys(device).forEach((key) => state.selected.add(key));
+      else deviceKeys.forEach((key) => state.selected.delete(key));
+      selectionChanged();
+    });
+
+    const name = document.createElement("span");
+    name.className = "legend-device-name";
+    name.textContent = device.name;
+    name.title = device.name;
+    const status = document.createElement("span");
+    status.className = `device-state ${device.status}`;
+    status.title = device.status;
+    header.append(disclosure, checkbox, name, status);
+    group.append(header);
+
+    const content = document.createElement("div");
+    content.className = "legend-device-content";
+    content.hidden = !state.expanded.has(device.id);
+    Object.entries(METRICS).forEach(([metric, definition]) => {
+      const phases = definition.phases.filter((phase) =>
+        deviceKeys.includes(`${device.id}:${metric}:${phase}`),
+      );
+      if (phases.length) content.append(createMetricGroup(device, metric, definition, phases));
+    });
+    group.append(content);
+    return group;
+  }
+
+  function createMetricGroup(device, metric, definition, phases) {
+    const group = document.createElement("section");
+    group.className = "legend-metric";
+    const groupKey = `${device.id}:${metric}`;
+    const header = document.createElement("div");
+    header.className = "legend-metric-header";
+    const disclosure = createDisclosure(
+      `${definition.label} bei ${device.name} ein- oder ausklappen`,
+      state.expanded.has(groupKey),
+      () => toggleExpanded(groupKey),
+    );
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.className = "legend-checkbox";
+    checkbox.setAttribute("aria-label", `Alle Phasen ${definition.label} bei ${device.name}`);
+    const keys = phases.map((phase) => `${device.id}:${metric}:${phase}`);
+    setCheckedState(checkbox, keys.filter((key) => state.selected.has(key)).length, keys.length);
+    checkbox.addEventListener("change", () => {
+      keys.forEach((key) => (checkbox.checked ? state.selected.add(key) : state.selected.delete(key)));
+      selectionChanged();
+    });
+    const label = document.createElement("span");
+    label.textContent = definition.label;
+    header.append(disclosure, checkbox, label);
+    group.append(header);
+
+    const rows = document.createElement("div");
+    rows.className = "legend-series-list";
+    rows.hidden = !state.expanded.has(groupKey);
+    phases.forEach((phase) => rows.append(createSeriesRow(device, metric, definition, phase)));
+    group.append(rows);
+    return group;
+  }
+
+  function createSeriesRow(device, metric, definition, phase) {
+    const key = `${device.id}:${metric}:${phase}`;
+    const label = document.createElement("label");
+    label.className = "legend-series";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.className = "legend-checkbox";
+    checkbox.checked = state.selected.has(key);
+    checkbox.setAttribute(
+      "aria-label",
+      `${device.name}, ${definition.label}, ${PHASE_LABELS[phase]}`,
+    );
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) state.selected.add(key);
+      else state.selected.delete(key);
+      selectionChanged();
+    });
+    const marker = document.createElement("span");
+    marker.className = `series-marker phase-${phase}`;
+    marker.style.setProperty("--series-color", state.visuals.get(key)?.color || "#fff");
+    const name = document.createElement("span");
+    name.className = "legend-series-name";
+    name.textContent = PHASE_LABELS[phase];
+    const value = document.createElement("output");
+    value.className = "legend-live-value";
+    value.dataset.seriesKey = key;
+    value.dataset.deviceId = device.id;
+    value.dataset.metric = metric;
+    value.dataset.phase = phase;
+    value.setAttribute("aria-label", `Livewert ${device.name} ${definition.label} ${PHASE_LABELS[phase]}`);
+    label.append(checkbox, marker, name, value);
+    return label;
+  }
+
+  function createDisclosure(label, expanded, listener) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "legend-disclosure";
+    button.setAttribute("aria-label", label);
+    button.setAttribute("aria-expanded", String(expanded));
+    button.textContent = expanded ? "▾" : "▸";
+    button.addEventListener("click", listener);
+    return button;
+  }
+
+  function toggleExpanded(key) {
+    if (state.expanded.has(key)) state.expanded.delete(key);
+    else state.expanded.add(key);
+    saveState();
+    renderLegend();
+  }
+
+  function selectionChanged() {
+    saveState();
+    renderLegend();
+    updateChartSelection();
+  }
+
+  function applyLegendCollapsedState() {
+    legend.classList.toggle("collapsed", state.legendCollapsed);
+    legendBody.hidden = state.legendCollapsed;
+    legendToggle.setAttribute("aria-expanded", String(!state.legendCollapsed));
+    legendToggle.querySelector(".legend-triangle").textContent = state.legendCollapsed ? "▸" : "▾";
+  }
+
+  function updateLiveValues() {
+    document.querySelectorAll(".legend-live-value").forEach((output) => {
+      const measurement = state.latest.get(output.dataset.deviceId);
+      const value = measurement?.values?.[`${output.dataset.metric}_${output.dataset.phase}`];
+      const received = measurement ? new Date(measurement.received_at) : null;
+      const device = state.devices.find((item) => item.id === output.dataset.deviceId);
+      const ageSeconds = received ? Math.max(0, (Date.now() - received.getTime()) / 1000) : Infinity;
+      const staleSeconds = Number(device?.stale_seconds) || 60;
+      const offlineSeconds = Number(device?.offline_seconds) || 300;
+      output.classList.toggle("stale", ageSeconds >= staleSeconds);
+      output.classList.toggle("offline", ageSeconds >= offlineSeconds);
+      if (!Number.isFinite(value) || !received) {
+        output.textContent = "keine Daten";
+        output.title = "Noch kein Rohwert empfangen";
+      } else if (ageSeconds >= offlineSeconds) {
+        output.textContent = `${formatLive(value, output.dataset.metric)} · nicht aktuell`;
+        output.title = `Letzter Rohwert: ${received.toLocaleString("de-DE")}`;
+      } else if (ageSeconds >= staleSeconds) {
+        output.textContent = `${formatLive(value, output.dataset.metric)} · veraltet`;
+        output.title = `Empfangen: ${received.toLocaleString("de-DE")}`;
+      } else {
+        output.textContent = formatLive(value, output.dataset.metric);
+        output.title = `Rohwert empfangen: ${received.toLocaleString("de-DE")}`;
+      }
     });
   }
 
-  function valueFor(measurement) {
-    return measurement?.values?.[`${state.metric}_${state.phase}`];
-  }
-
-  function renderLiveCards() {
-    const container = document.querySelector("#liveCards");
-    container.replaceChildren();
-    const unit = { current: "A", voltage: "V", power: "W" }[state.metric];
-    state.devices
-      .filter((device) => state.visible.has(device.id))
-      .slice(0, 8)
-      .forEach((device) => {
-        const measurement = state.latest.get(device.id);
-        const value = valueFor(measurement);
-        const card = document.createElement("div");
-        card.className = "live-card";
-        const name = document.createElement("span");
-        name.className = "live-card-name";
-        name.textContent = device.name;
-        const meta = document.createElement("span");
-        meta.className = "live-card-meta";
-        meta.textContent = measurement ? new Date(measurement.received_at).toLocaleTimeString("de-DE") : "keine Daten";
-        const current = document.createElement("strong");
-        current.className = "live-card-value";
-        current.style.color = device.color;
-        current.textContent = Number.isFinite(value) ? `${formatLive(value)} ${unit}` : "–";
-        card.append(name, current, meta);
-        container.append(card);
-      });
-  }
-
-  function formatLive(value) {
-    if (Math.abs(value) >= 1000) return `${(value / 1000).toFixed(2)}k`;
-    return Math.abs(value) >= 100 ? value.toFixed(0) : value.toFixed(2);
-  }
-
-  function updateControls() {
-    metricControls.querySelectorAll("button").forEach((button) => {
-      button.classList.toggle("active", button.dataset.metric === state.metric);
-    });
-    phaseControls.querySelectorAll("button").forEach((button) => {
-      const unavailable = state.metric === "voltage" && button.dataset.phase === "total";
-      button.disabled = unavailable;
-      button.classList.toggle("active", button.dataset.phase === state.phase);
-    });
-  }
-
-  function selectMetric(metric) {
-    state.metric = metric;
-    if (metric === "voltage" && state.phase === "total") state.phase = "l1";
-    localStorage.setItem("ga.metric", state.metric);
-    localStorage.setItem("ga.phase", state.phase);
-    updateControls();
-    renderLiveCards();
-    loadHistory().catch(showPublicError);
-  }
-
-  function selectPhase(phase) {
-    if (state.metric === "voltage" && phase === "total") return;
-    state.phase = phase;
-    localStorage.setItem("ga.phase", state.phase);
-    updateControls();
-    renderLiveCards();
-    loadHistory().catch(showPublicError);
+  function formatLive(value, metric) {
+    if (metric === "power" && Math.abs(value) >= 1000) return `${(value / 1000).toFixed(2)} kW`;
+    const decimals = Math.abs(value) >= 100 ? 1 : 2;
+    return `${Number(value).toLocaleString("de-DE", {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals,
+    })} ${METRICS[metric].unit}`;
   }
 
   function connectLive() {
+    if (state.destroyed) return;
     clearTimeout(state.reconnectTimer);
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
     state.socket = new WebSocket(`${protocol}//${location.host}/api/public/live-stream`);
@@ -175,11 +411,13 @@ Changes:
       const message = JSON.parse(event.data);
       if (message.type === "snapshot") {
         message.data.forEach((measurement) => state.latest.set(measurement.device_id, measurement));
+      } else if (message.type === "measurement") {
+        state.latest.set(message.data.device_id, message.data);
       }
-      if (message.type === "measurement") state.latest.set(message.data.device_id, message.data);
-      renderLiveCards();
+      updateLiveValues();
     });
     state.socket.addEventListener("close", () => {
+      if (state.destroyed) return;
       setConnection("offline", "Verbindung getrennt");
       state.reconnectTimer = setTimeout(connectLive, state.reconnectDelay);
       state.reconnectDelay = Math.min(30000, state.reconnectDelay * 1.8);
@@ -230,19 +468,13 @@ Changes:
     console.error(error);
   }
 
-  metricControls.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-metric]");
-    if (button) selectMetric(button.dataset.metric);
-  });
-  phaseControls.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-phase]");
-    if (button) selectPhase(button.dataset.phase);
-  });
   legendToggle.addEventListener("click", () => {
-    const collapsed = legend.classList.toggle("collapsed");
-    legendToggle.setAttribute("aria-expanded", String(!collapsed));
-    chart.resize();
+    state.legendCollapsed = !state.legendCollapsed;
+    applyLegendCollapsedState();
+    saveState();
   });
+  legend.addEventListener("wheel", (event) => event.stopPropagation(), { passive: true });
+  document.querySelector("#zoomReset").addEventListener("click", () => chart.resetZoom());
   menuButton.addEventListener("click", openMenu);
   loginForm.addEventListener("submit", submitLogin);
   document.querySelectorAll("[data-close-dialog]").forEach((button) => {
@@ -254,18 +486,38 @@ Changes:
       window.GAAdmin.close();
     }
   });
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) loadHistory({ force: true }).catch(showPublicError);
+  });
+  window.addEventListener(
+    "pagehide",
+    () => {
+      state.destroyed = true;
+      clearTimeout(state.reconnectTimer);
+      clearInterval(state.historyTimer);
+      clearInterval(state.liveTimer);
+      state.socket?.close();
+      chart.destroy();
+    },
+    { once: true },
+  );
 
-  updateControls();
+  applyLegendCollapsedState();
   Promise.all([loadDevices(), fetchJson("/api/public/live")])
     .then(([, live]) => {
       live.measurements.forEach((measurement) => state.latest.set(measurement.device_id, measurement));
-      renderLiveCards();
-      return loadHistory();
+      updateLiveValues();
+      return loadHistory({ force: true });
     })
     .catch(showPublicError);
   connectLive();
-  setInterval(() => loadHistory().catch(showPublicError), 60000);
-  setInterval(() => loadDevices().catch(showPublicError), 60000);
+  state.liveTimer = setInterval(updateLiveValues, 1000);
+  state.historyTimer = setInterval(() => loadHistory().catch(showPublicError), 10_000);
 
-  window.GAApp = { fetchJson, loadDevices, loadHistory };
+  window.GAApp = {
+    fetchJson,
+    loadDevices,
+    loadHistory,
+    getSelection: () => new Set(state.selected),
+  };
 })();

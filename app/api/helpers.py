@@ -1,10 +1,11 @@
 """
 File: app/api/helpers.py
-Version: 0.1.0
-Date: 2026-08-03
+Version: 0.2.0
+Date: 2026-08-04
 Purpose: Serializes database objects without exposing secret fields.
 Changes:
 - 0.1.0: Initial implementation.
+- 0.2.0: Exposes series capabilities and freshness thresholds to the monitor.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from app.config import Settings
 from app.core.time import as_utc, utc_now
 from app.db.models import Device
 from app.services.live_store import LiveStore
+from app.services.measurement import SERIES_DEFINITIONS
 
 
 def iso(value: datetime | None) -> str | None:
@@ -43,6 +45,11 @@ def public_device(device: Device, settings: Settings, live_store: LiveStore) -> 
         "is_online": device.is_online,
         "last_seen_at": iso(device.last_seen_at),
         "has_data": latest is not None or device.last_seen_at is not None,
+        "available_series": [
+            f"{metric}:{phase}" for metric, phases in SERIES_DEFINITIONS.items() for phase in phases
+        ],
+        "stale_seconds": settings.stale_seconds,
+        "offline_seconds": settings.offline_seconds,
     }
 
 

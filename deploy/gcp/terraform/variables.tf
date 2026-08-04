@@ -1,5 +1,5 @@
 # File: deploy/gcp/terraform/variables.tf
-# Version: 0.1.2
+# Version: 0.2.0
 # Date: 2026-08-04
 # Purpose: Controls explicit creation, reuse and import of GA-Server GCP resources.
 
@@ -319,7 +319,7 @@ variable "deployment_source_base_url" {
 variable "deployment_source_ref" {
   description = "Immutable release tag or full commit SHA for deployment files. main is allowed only for controlled testing."
   type        = string
-  default     = "v0.1.2"
+  default     = "v0.2.0"
 
   validation {
     condition = (
@@ -331,9 +331,9 @@ variable "deployment_source_ref" {
 }
 
 variable "image_tag" {
-  description = "GA-Server GHCR tag: latest, main, sha-<commit> or a semantic version such as 0.1.2."
+  description = "GA-Server GHCR tag: latest, main, sha-<commit> or a semantic version such as 0.2.0."
   type        = string
-  default     = "0.1.2"
+  default     = "0.2.0"
 
   validation {
     condition = can(regex(

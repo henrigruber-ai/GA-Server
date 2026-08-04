@@ -1,5 +1,5 @@
 # File: deploy/gcp/terraform/outputs.tf
-# Version: 0.1.2
+# Version: 0.2.0
 # Date: 2026-08-04
 # Purpose: Exposes selected resource values without assuming unknown names.
 

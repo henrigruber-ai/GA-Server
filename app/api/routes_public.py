@@ -1,10 +1,11 @@
 """
 File: app/api/routes_public.py
-Version: 0.1.0
-Date: 2026-08-03
+Version: 0.2.0
+Date: 2026-08-04
 Purpose: Provides bounded, read-only public device, live, history, stats, and WebSocket APIs.
 Changes:
 - 0.1.0: Initial implementation.
+- 0.2.0: Adds one bundled history response for all requested measurement series.
 """
 
 from __future__ import annotations
@@ -18,13 +19,10 @@ from sqlalchemy import select
 from app.api.helpers import iso, public_device
 from app.core.time import utc_now
 from app.db.models import Device, DeviceWindowStat, MinuteMeasurement
+from app.services.measurement import SERIES_DEFINITIONS
 
 router = APIRouter(prefix="/api/public", tags=["public"])
-VALID_SERIES = {
-    "current": {"l1", "l2", "l3", "total"},
-    "voltage": {"l1", "l2", "l3"},
-    "power": {"l1", "l2", "l3", "total"},
-}
+VALID_SERIES = {metric: set(phases) for metric, phases in SERIES_DEFINITIONS.items()}
 
 
 @router.get("/devices")
@@ -110,6 +108,78 @@ def history(
     }
 
 
+@router.get("/history-batch")
+def history_batch(
+    request: Request,
+    series: str = Query(
+        default="current:l1,current:l2,current:l3",
+        max_length=512,
+    ),
+    from_time: str | None = Query(default=None, alias="from"),
+    to_time: str | None = Query(default=None, alias="to"),
+    max_points: int = Query(default=1440, ge=60, le=2880),
+) -> dict[str, object]:
+    requested = _parse_series(series)
+    if not requested:
+        return {"series": [], "error": "no_valid_series"}
+    now = utc_now()
+    try:
+        end = min(now, _parse_time(to_time) if to_time else now)
+        start = _parse_time(from_time) if from_time else end - timedelta(hours=24)
+    except ValueError:
+        return {"series": [], "error": "invalid_time"}
+    start = max(start, end - timedelta(days=8))
+    columns = [
+        getattr(MinuteMeasurement, f"{metric}_{phase}_avg").label(f"{metric}_{phase}")
+        for metric, phase in requested
+    ]
+    runtime = request.app.state.runtime
+    output: list[dict[str, object]] = []
+    with runtime.database.sessions() as session:
+        enabled_devices = session.scalars(
+            select(Device)
+            .where(Device.enabled.is_(True), Device.removed_at.is_(None))
+            .order_by(Device.sort_order, Device.name)
+            .limit(200)
+        ).all()
+        for device in enabled_devices:
+            rows = session.execute(
+                select(MinuteMeasurement.bucket_start, *columns)
+                .where(
+                    MinuteMeasurement.device_id == device.id,
+                    MinuteMeasurement.bucket_start >= start,
+                    MinuteMeasurement.bucket_start <= end,
+                )
+                .order_by(MinuteMeasurement.bucket_start)
+                .limit(11_520)
+            ).all()
+            stride = max(1, (len(rows) + max_points - 1) // max_points)
+            sampled = rows[::stride]
+            for column_index, (metric, phase) in enumerate(requested, start=1):
+                points = [
+                    [iso(row.bucket_start), row[column_index]]
+                    for row in sampled
+                    if row[column_index] is not None
+                ]
+                output.append(
+                    {
+                        "key": f"{device.id}:{metric}:{phase}",
+                        "device_id": device.id,
+                        "name": device.name,
+                        "metric": metric,
+                        "phase": phase,
+                        "points": points,
+                    }
+                )
+    return {
+        "from": start.isoformat(),
+        "to": end.isoformat(),
+        "aggregated": True,
+        "interval": "minute",
+        "series": output,
+    }
+
+
 @router.get("/window-stats")
 def window_stats(
     request: Request,
@@ -173,3 +243,13 @@ def _parse_time(value: str) -> datetime:
     if parsed.tzinfo is None:
         raise ValueError("Timezone is required")
     return parsed
+
+
+def _parse_series(value: str) -> list[tuple[str, str]]:
+    requested: list[tuple[str, str]] = []
+    for item in value.split(","):
+        metric, separator, phase = item.strip().partition(":")
+        candidate = (metric, phase)
+        if separator and phase in VALID_SERIES.get(metric, set()) and candidate not in requested:
+            requested.append(candidate)
+    return requested

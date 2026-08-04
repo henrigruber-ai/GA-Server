@@ -1,6 +1,6 @@
 <!--
 File: deploy/gcp/README.md
-Version: 0.1.2
+Version: 0.2.0
 Date: 2026-08-04
 Purpose: Operates GA-Server on GCP from published images without a source checkout.
 -->
@@ -128,7 +128,7 @@ Dann einen unveränderlichen Release-Tag oder vollständigen Commit verwenden:
 
 ```bash
 curl -fsSL \
-  https://raw.githubusercontent.com/henrigruber-ai/GA-Server/v0.1.2/deploy/gcp/bootstrap.sh \
+  https://raw.githubusercontent.com/henrigruber-ai/GA-Server/v0.2.0/deploy/gcp/bootstrap.sh \
   -o /tmp/ga-server-bootstrap.sh
 chmod 0755 /tmp/ga-server-bootstrap.sh
 
@@ -136,8 +136,8 @@ sudo \
   GA_PROJECT_ID=gruber-ga-server-prod \
   GA_DATA_DEVICE_NAME=<ATTACHED_DEVICE_NAME> \
   GA_ALLOW_DATA_DISK_FORMAT=false \
-  GA_DEPLOYMENT_SOURCE_REF=v0.1.2 \
-  GA_SERVER_IMAGE_TAG=0.1.2 \
+  GA_DEPLOYMENT_SOURCE_REF=v0.2.0 \
+  GA_SERVER_IMAGE_TAG=0.2.0 \
   GA_MQTT_SECRET_NAME=<MQTT_SECRET_NAME> \
   GA_PUBLIC_BASE_URL=https://<PUBLIC_HOSTNAME> \
   GA_MQTT_PUBLIC_HOST=<MQTT_HOSTNAME> \
@@ -211,7 +211,7 @@ verwaltet sein Website-Zertifikat selbst und bewahrt ACME-Daten persistent auf.
 Bevorzugt ist ein öffentlich lesbares Paket. Dann genügt:
 
 ```bash
-docker pull ghcr.io/henrigruber-ai/ga-server:0.1.2
+docker pull ghcr.io/henrigruber-ai/ga-server:0.2.0
 ```
 
 Bei einem privaten Paket wird ein ausschließlich mit `read:packages`
@@ -236,7 +236,7 @@ Unterstützt:
 - `latest` und `main`: beweglich; folgen erfolgreichen Main-Builds.
 - `sha-<commit>`: auf einen konkreten Commit rückführbar und für kontrollierte
   Rollbacks geeignet.
-- `0.1.2`: Release-Version; für Produktion bevorzugt und als unveränderlicher
+- `0.2.0`: Release-Version; für Produktion bevorzugt und als unveränderlicher
   Veröffentlichungsstand zu behandeln.
 
 Normales Update ohne Terraform, Git und Build:

@@ -1,11 +1,32 @@
 <!--
 File: CHANGELOG.md
-Version: 0.1.2
+Version: 0.2.0
 Date: 2026-08-04
 Purpose: Records user-visible changes by semantic version.
 -->
 
 # Versionshistorie
+
+## 0.2.0 – 2026-08-04
+
+- Strommonitor: Die Auswahl von Messstellen, Strom, Spannung, Leistung und
+  Phasen wurde in eine ausklappbare Diagrammlegende integriert.
+- Strommonitor: Beliebige Messgrößen und Phasen mehrerer Messstellen können
+  jetzt gleichzeitig dargestellt werden.
+- Strommonitor: Jede Datenreihe besitzt eine eindeutige und konsistente Farbe
+  sowie ein zur Phase passendes Linienmuster.
+- Strommonitor: Livewerte werden direkt in der Legende angezeigt und
+  sekündlich aus den zuletzt empfangenen Rohwerten aktualisiert.
+- Strommonitor: Das Diagramm wird unabhängig davon alle zehn Sekunden
+  gebündelt aus den historischen Minutenwerten aktualisiert.
+- Strommonitor: Die bisherigen Livewert-Karten und die obere globale Auswahl
+  wurden entfernt.
+- Strommonitor: Touchgeräte unterstützen Finger-Zoom und Verschieben.
+- Strommonitor: Desktopgeräte unterstützen Rechteck-Zoom mit der Maus.
+- Strommonitor: Legende, getrennte Achsen für A, V und W/kW sowie die Bedienung
+  wurden für mobile Ansichten optimiert.
+- Tests für Auswahl, Livewerte, Datenreihen, Zoom, Aktualisierung und
+  responsive Darstellung wurden ergänzt.
 
 ## 0.1.2 – 2026-08-04
 

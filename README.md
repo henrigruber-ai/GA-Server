@@ -1,11 +1,11 @@
 <!--
 File: README.md
-Version: 0.1.2
+Version: 0.2.0
 Date: 2026-08-04
 Purpose: Explains installation, operation, Shelly configuration, security, tests, and recovery.
 -->
 
-# GA-Server 0.1.2
+# GA-Server 0.2.0
 
 GA-Server empfängt elektrische Messwerte mehrerer Shelly Pro 3EM, fasst sie zu
 Minutenwerten zusammen und zeigt sie als öffentlichen, bildschirmfüllenden
@@ -19,15 +19,21 @@ Wichtig:
 - Ein Shelly darf **nicht** die HTTPS-Adresse als MQTT-Server verwenden.
 - Port 1883 bleibt im Docker-Netz und wird nicht öffentlich freigegeben.
 
-## Funktionsumfang 0.1.2
+## Funktionsumfang 0.2.0
 
 - Strom L1/L2/L3/Gesamt, Spannung L1/L2/L3 und Wirkleistung
   L1/L2/L3/Gesamt
-- dynamische aktive Geräte als stabile farbige Linien
-- Canvas-Graph mit rollierenden 24 Stunden, Tooltip, Touch-Auswertung,
-  Retina-Skalierung und `ResizeObserver`
+- ausklappbare, in den Graphen eingebettete Hierarchie für eine unabhängige
+  Auswahl beliebiger Messstellen, Messgrößen und Phasen
+- deterministische Farbe je Datenreihe sowie ergänzende Phasen-Linienmuster
+- Canvas-Graph mit getrennten, nur bei Bedarf sichtbaren Skalen für A, V und
+  W/kW, gruppiertem Tooltip, Retina-Skalierung und `ResizeObserver`
+- Pinch-Zoom und Verschieben auf Touchgeräten, Rechteck-Zoom und Doppelklick zum
+  Zurücksetzen auf Desktopgeräten
 - Vollbildansicht mit `100dvh`, Safe Areas und ohne permanente Kopfzeile
-- WebSocket-Livewerte mit begrenztem Reconnect-Backoff
+- sekündlich dargestellte WebSocket-Roh-Livewerte in der Legende mit
+  Alterskennzeichnung und begrenztem Reconnect-Backoff
+- gebündelte Diagrammaktualisierung im Abstand von zehn Sekunden
 - begrenzter RAM-Puffer; keine dauerhafte Speicherung hochaufgelöster Rohwerte
 - genau eine aggregierte Zeile pro Gerät/UTC-Minute
 - Min/Max/Mittel je Messreihe sowie rollierende 1h-/24h-/7d-Statistik
@@ -149,7 +155,7 @@ Nach Anmeldung Burger-Menü → **Geräte** → Plus-Button:
 - Passwort oder automatisch erzeugtes Passwort
 - Sortierung, Farbe, aktiv/deaktiviert
 
-Ein automatisch erzeugtes Passwort wird nur einmal angezeigt. In 0.1.2 muss
+Ein automatisch erzeugtes Passwort wird nur einmal angezeigt. In 0.2.0 muss
 dieser Benutzer zusätzlich mit `mosquitto_passwd` in Mosquitto angelegt werden.
 Eine Umbenennung ändert die interne UUID und die historischen Daten nicht.
 
@@ -262,6 +268,7 @@ Details für GCP stehen in [`deploy/gcp/README.md`](deploy/gcp/README.md).
 GET /api/public/devices
 GET /api/public/live
 GET /api/public/history?metric=power&phase=total&from=...&to=...
+GET /api/public/history-batch?series=current:l1,voltage:l1,power:total&from=...&to=...
 GET /api/public/window-stats?metric=power&phase=total
 WS  /api/public/live-stream
 ```
@@ -269,6 +276,23 @@ WS  /api/public/live-stream
 Die Historie ist auf acht Tage, 2.880 ausgegebene Punkte je Gerät und begrenzte
 SQL-Ergebnisse beschränkt. Öffentliche Antworten enthalten keine Sessions,
 Hashes, MQTT-Passwörter, privaten Settings oder Auditdaten.
+
+Der Strommonitor fragt alle historischen Minutenreihen gebündelt ungefähr alle
+zehn Sekunden ab. Diese Kurvenpunkte sind weiterhin Minutenmittelwerte. Davon
+getrennt stammen die Werte in der Legende aus dem letzten tatsächlich über MQTT
+empfangenen Rohdatensatz und werden aus dem bestehenden WebSocket-Zustand jede
+Sekunde neu dargestellt; es findet keine Interpolation und keine Umrechnung aus
+Minutenwerten statt. Die in der Serverkonfiguration definierten Schwellen
+`GA_STALE_SECONDS` und `GA_OFFLINE_SECONDS` steuern die Kennzeichnung als
+„veraltet“ beziehungsweise „nicht aktuell“.
+
+Auswahl, aufgeklappte Gruppen und Legendenzustand werden als validierter,
+versionierter Zustand im lokalen Browser gespeichert. Nicht mehr vorhandene
+Messstellen oder Reihen werden beim Laden ignoriert. Der Zoom bleibt bei
+automatischen Diagrammaktualisierungen bestehen. Auf Touchgeräten wird mit zwei
+Fingern horizontal gezoomt und im vergrößerten Bereich verschoben; am Desktop
+wird ein Zeitbereich mit gedrückter linker Maustaste aufgezogen. Doppelklick
+oder „Zoom zurücksetzen“ stellt den rollierenden 24-Stunden-Bereich wieder her.
 
 ## Tests
 
@@ -336,7 +360,7 @@ Rollback:
 Setze in Produktion mindestens `GA_ENV=production` und
 `GA_COOKIE_SECURE=true`.
 
-## Bekannte Einschränkungen 0.1.2
+## Bekannte Einschränkungen 0.2.0
 
 - Mosquitto-Passwörter werden aus Sicherheitsgründen nicht durch eine öffentliche
   API geschrieben. Der Betreiber synchronisiert sie mit `mosquitto_passwd`.

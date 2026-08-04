@@ -1,10 +1,11 @@
 {#
 File: app/web/templates/index.html
-Version: 0.1.0
-Date: 2026-08-03
+Version: 0.2.0
+Date: 2026-08-04
 Purpose: Hosts the public full-screen monitor and protected administration overlays.
 Changes:
 - 0.1.0: Initial implementation.
+- 0.2.0: Replaces global graph controls and live cards with an embedded series legend.
 #}
 <!doctype html>
 <html lang="de" data-version="{{ version }}">
@@ -27,34 +28,28 @@ Changes:
       <span>Strommonitor</span>
     </div>
 
-    <div class="control-overlay" aria-label="Graph-Auswahl">
-      <div class="segmented" id="metricControls" role="group" aria-label="Messgröße">
-        <button type="button" data-metric="current">Strom</button>
-        <button type="button" data-metric="voltage">Spannung</button>
-        <button type="button" data-metric="power" class="active">Leistung</button>
-      </div>
-      <div class="segmented" id="phaseControls" role="group" aria-label="Phase">
-        <button type="button" data-phase="l1">L1</button>
-        <button type="button" data-phase="l2">L2</button>
-        <button type="button" data-phase="l3">L3</button>
-        <button type="button" data-phase="total" class="active">Gesamt</button>
-      </div>
-    </div>
-
-    <button id="legendToggle" class="legend-toggle" type="button" aria-expanded="true"
-            aria-controls="deviceLegend">
-      Geräte
-    </button>
-    <section id="deviceLegend" class="legend-overlay" aria-label="Gerätelegende">
-      <div class="legend-title">
-        <span>Messstellen</span>
+    <section id="deviceLegend" class="legend-overlay" aria-label="Datenreihen auswählen"
+             data-chart-interactive>
+      <header class="legend-title">
+        <button id="legendToggle" class="legend-collapse" type="button"
+                aria-expanded="true" aria-controls="legendBody">
+          <span class="legend-triangle" aria-hidden="true">▾</span>
+          <span>Messstellen</span>
+        </button>
         <span id="legendCount" class="muted">0</span>
+      </header>
+      <div id="legendBody" class="legend-body">
+        <div id="legendWarning" class="legend-warning hidden" role="status"></div>
+        <div id="legendRows" class="legend-rows" role="group"
+             aria-label="Messstellen und Datenreihen"></div>
       </div>
-      <div id="legendRows" class="legend-rows" role="group" aria-label="Sichtbare Geräte"></div>
     </section>
 
-    <div id="liveCards" class="live-cards" aria-live="polite"></div>
     <div id="tooltip" class="chart-tooltip hidden" role="status"></div>
+    <button id="zoomReset" class="zoom-reset hidden" type="button"
+            aria-label="Diagrammzoom zurücksetzen" data-chart-interactive>
+      Zoom zurücksetzen
+    </button>
     <div id="connectionBadge" class="connection-badge connecting">
       <span class="status-dot"></span><span>Verbinde …</span>
     </div>

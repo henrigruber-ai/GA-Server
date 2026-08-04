@@ -1,5 +1,5 @@
 # File: deploy/production/docker-compose.yml
-# Version: 0.1.2
+# Version: 0.2.0
 # Date: 2026-08-04
 # Purpose: Runs the complete production stack from published images with host persistence.
 
@@ -7,7 +7,7 @@ name: ga-server
 
 services:
   ga-server:
-    image: ${GA_SERVER_IMAGE:-ghcr.io/henrigruber-ai/ga-server:0.1.2}
+    image: ${GA_SERVER_IMAGE:-ghcr.io/henrigruber-ai/ga-server:0.2.0}
     pull_policy: always
     restart: unless-stopped
     user: "10001:10001"

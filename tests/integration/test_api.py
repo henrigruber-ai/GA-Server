@@ -1,11 +1,12 @@
 """
 File: tests/integration/test_api.py
-Version: 0.1.1
+Version: 0.2.0
 Date: 2026-08-04
 Purpose: Exercises public access, auth, CSRF, device lifecycle, history, and WebSockets.
 Changes:
 - 0.1.0: Initial implementation.
 - 0.1.1: Verifies readiness when MQTT is intentionally disabled.
+- 0.2.0: Verifies bundled multi-unit history and raw live-series metadata.
 """
 
 from datetime import UTC, datetime
@@ -114,16 +115,41 @@ def test_simulated_mqtt_creates_live_and_one_minute_row(
     assert not runtime.mqtt.handle_message("ga/devices/werkstatt/status/em:0", payload, received)
     assert client.get("/api/public/live").json()["measurements"][0]["values"]["power_total"] == 600
     runtime.aggregator.flush_due(force=True)
-    history = client.get("/api/public/history?metric=power&phase=total").json()
-    assert history["series"][0]["device_id"] == created["id"]
-    assert history["series"][0]["points"][0][1] == 600
     historical = client.get(
         "/api/public/history?metric=power&phase=total"
         "&from=2026-08-03T18:00:00%2B00:00&to=2026-08-03T19:00:00%2B00:00"
     ).json()
     assert historical["series"][0]["points"][0][1] == 600
+    bundled = client.get(
+        "/api/public/history-batch?series=current:l1,voltage:l2,power:total"
+        "&from=2026-08-03T18:00:00%2B00:00&to=2026-08-03T19:00:00%2B00:00"
+    ).json()
+    assert bundled["aggregated"] is True
+    assert bundled["interval"] == "minute"
+    assert {
+        (item["metric"], item["phase"], item["points"][0][1]) for item in bundled["series"]
+    } == {
+        ("current", "l1", 1),
+        ("voltage", "l2", 231),
+        ("power", "total", 600),
+    }
+    public_device = client.get("/api/public/devices").json()[0]
+    assert "voltage:total" not in public_device["available_series"]
+    assert public_device["stale_seconds"] < public_device["offline_seconds"]
     with runtime.database.sessions() as session:
         assert session.query(Device).filter_by(id=created["id"]).one().last_seen_at is not None
+
+
+def test_history_batch_ignores_invalid_and_duplicate_series(client: TestClient) -> None:
+    response = client.get(
+        "/api/public/history-batch?series=voltage:total,current:l1,current:l1,unknown:l2"
+    )
+    assert response.status_code == 200
+    assert response.json()["series"] == []
+    assert "error" not in response.json()
+
+    invalid = client.get("/api/public/history-batch?series=voltage:total")
+    assert invalid.json() == {"series": [], "error": "no_valid_series"}
 
 
 def test_websocket_connection_receives_snapshot(client: TestClient) -> None:

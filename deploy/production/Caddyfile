@@ -1,5 +1,5 @@
 # File: deploy/production/Caddyfile
-# Version: 0.1.2
+# Version: 0.2.0
 # Date: 2026-08-04
 # Purpose: Terminates public HTTPS and proxies HTTP and WebSocket traffic to GA-Server.
 {
