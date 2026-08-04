@@ -36,7 +36,7 @@ output "iap_ssh_command" {
 output "required_dns_records" {
   description = "DNS records that must point to the reserved public IP."
   value = {
-    "strom.gruber-automation.de"       = google_compute_address.public.address
+    "strom.gruber-automation.de"      = google_compute_address.public.address
     "mqtt.strom.gruber-automation.de" = google_compute_address.public.address
   }
 }
