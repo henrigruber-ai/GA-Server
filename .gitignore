@@ -1,9 +1,10 @@
 # File: .gitignore
-# Version: 0.1.0
-# Date: 2026-08-03
+# Version: 0.1.1
+# Date: 2026-08-04
 # Purpose: Excludes local runtime data, secrets, caches, and generated artifacts.
 
 .env
+deploy/production/.env
 .venv/
 __pycache__/
 *.py[cod]

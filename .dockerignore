@@ -1,11 +1,12 @@
 # File: .dockerignore
-# Version: 0.1.0
-# Date: 2026-08-03
+# Version: 0.1.1
+# Date: 2026-08-04
 # Purpose: Keeps local and sensitive files out of container build contexts.
 
 .git
 .github
 .env
+.env.*
 .venv
 __pycache__
 .pytest_cache
@@ -15,4 +16,9 @@ data
 backups
 logs
 certs
+secrets
+mosquitto/config/passwords
+*.crt
+*.key
+*.pem
 tests

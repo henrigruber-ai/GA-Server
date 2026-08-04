@@ -1,0 +1,192 @@
+# File: deploy/production/docker-compose.yml
+# Version: 0.1.1
+# Date: 2026-08-04
+# Purpose: Runs the complete production stack from published images with host persistence.
+
+name: ga-server
+
+services:
+  ga-server:
+    image: ${GA_SERVER_IMAGE:-ghcr.io/henrigruber-ai/ga-server:latest}
+    pull_policy: always
+    restart: unless-stopped
+    user: "10001:10001"
+    environment:
+      GA_ENV: production
+      GA_DATABASE_URL: sqlite:////data/ga-server.db
+      GA_PUBLIC_BASE_URL: ${GA_PUBLIC_BASE_URL:?Set GA_PUBLIC_BASE_URL in .env}
+      GA_TIMEZONE: ${GA_TIMEZONE:-Europe/Berlin}
+      GA_COOKIE_SECURE: "true"
+      GA_MQTT_ENABLED: "true"
+      GA_MQTT_HOST: mosquitto
+      GA_MQTT_PORT: "1883"
+      GA_MQTT_TLS: "false"
+      GA_MQTT_USERNAME: ${GA_MQTT_USERNAME:-ga-server}
+      GA_MQTT_PASSWORD_FILE: /run/secrets/ga_mqtt_password
+      GA_MQTT_PUBLIC_HOST: ${GA_MQTT_PUBLIC_HOST:?Set GA_MQTT_PUBLIC_HOST in .env}
+      GA_MQTT_PUBLIC_PORT: "8883"
+      GA_DB_MAX_MB: ${GA_DB_MAX_MB:-500}
+      GA_DB_CLEANUP_START_PERCENT: ${GA_DB_CLEANUP_START_PERCENT:-85}
+      GA_DB_CLEANUP_TARGET_PERCENT: ${GA_DB_CLEANUP_TARGET_PERCENT:-70}
+      GA_MIN_HISTORY_DAYS: ${GA_MIN_HISTORY_DAYS:-8}
+      GA_MIN_FREE_DISK_MB: ${GA_MIN_FREE_DISK_MB:-512}
+      GA_SEED_EXAMPLE_DEVICES: ${GA_SEED_EXAMPLE_DEVICES:-false}
+      GA_LOG_LEVEL: ${GA_LOG_LEVEL:-INFO}
+      TZ: ${GA_TIMEZONE:-Europe/Berlin}
+    volumes:
+      - type: bind
+        source: ${GA_DATA_DIR:-/srv/ga-server}/app
+        target: /data
+    secrets:
+      - ga_mqtt_password
+    networks:
+      - web
+      - mqtt
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+        restart: true
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777,noexec,nosuid,nodev
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  mosquitto:
+    image: eclipse-mosquitto:2.0.22
+    pull_policy: always
+    restart: unless-stopped
+    user: "1883:1883"
+    environment:
+      GA_MQTT_USERNAME: ${GA_MQTT_USERNAME:-ga-server}
+      TZ: ${GA_TIMEZONE:-Europe/Berlin}
+    volumes:
+      - type: bind
+        source: ./mosquitto.conf
+        target: /mosquitto/config/mosquitto.conf
+        read_only: true
+      - type: bind
+        source: ${GA_DATA_DIR:-/srv/ga-server}/mqtt/config/passwords
+        target: /mosquitto/config/passwords
+        read_only: true
+      - type: bind
+        source: ${GA_DATA_DIR:-/srv/ga-server}/mqtt/certs
+        target: /mosquitto/certs
+        read_only: true
+      - type: bind
+        source: ${GA_DATA_DIR:-/srv/ga-server}/mosquitto/data
+        target: /mosquitto/data
+      - type: bind
+        source: ${GA_DATA_DIR:-/srv/ga-server}/mosquitto/log
+        target: /mosquitto/log
+    secrets:
+      - ga_mqtt_password
+    ports:
+      - "${GA_MQTT_BIND_ADDRESS:-0.0.0.0}:${GA_MQTT_TLS_PORT:-8883}:8883"
+    networks:
+      - mqtt
+      - mqtt-public
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          mosquitto_sub -h 127.0.0.1 -p 1883
+          -u "$${GA_MQTT_USERNAME}"
+          -P "$$(cat /run/secrets/ga_mqtt_password)"
+          -t '$$SYS/broker/uptime' -C 1 -W 3
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777,noexec,nosuid,nodev
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  caddy:
+    image: caddy:2.11.4-alpine
+    pull_policy: always
+    restart: unless-stopped
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env}
+      GA_PUBLIC_BASE_URL: ${GA_PUBLIC_BASE_URL:?Set GA_PUBLIC_BASE_URL in .env}
+      TZ: ${GA_TIMEZONE:-Europe/Berlin}
+    ports:
+      - "${GA_HTTP_BIND_ADDRESS:-0.0.0.0}:${GA_HTTP_PORT:-80}:80"
+      - "${GA_HTTPS_BIND_ADDRESS:-0.0.0.0}:${GA_HTTPS_PORT:-443}:443"
+      - "${GA_HTTPS_BIND_ADDRESS:-0.0.0.0}:${GA_HTTPS_PORT:-443}:443/udp"
+    volumes:
+      - type: bind
+        source: ./Caddyfile
+        target: /etc/caddy/Caddyfile
+        read_only: true
+      - type: bind
+        source: ${GA_DATA_DIR:-/srv/ga-server}/caddy/data
+        target: /data
+      - type: bind
+        source: ${GA_DATA_DIR:-/srv/ga-server}/caddy/config
+        target: /config
+    networks:
+      - web
+    depends_on:
+      ga-server:
+        condition: service_healthy
+        restart: true
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777,noexec,nosuid,nodev
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+networks:
+  web:
+    driver: bridge
+  mqtt:
+    driver: bridge
+    internal: true
+  mqtt-public:
+    driver: bridge
+
+secrets:
+  ga_mqtt_password:
+    file: ${GA_DATA_DIR:-/srv/ga-server}/secrets/ga_mqtt_password

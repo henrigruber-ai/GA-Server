@@ -1,11 +1,11 @@
 <!--
 File: README.md
-Version: 0.1.0
-Date: 2026-08-03
+Version: 0.1.1
+Date: 2026-08-04
 Purpose: Explains installation, operation, Shelly configuration, security, tests, and recovery.
 -->
 
-# GA-Server 0.1.0
+# GA-Server 0.1.1
 
 GA-Server empfängt elektrische Messwerte mehrerer Shelly Pro 3EM, fasst sie zu
 Minutenwerten zusammen und zeigt sie als öffentlichen, bildschirmfüllenden
@@ -19,7 +19,7 @@ Wichtig:
 - Ein Shelly darf **nicht** die HTTPS-Adresse als MQTT-Server verwenden.
 - Port 1883 bleibt im Docker-Netz und wird nicht öffentlich freigegeben.
 
-## Funktionsumfang 0.1.0
+## Funktionsumfang 0.1.1
 
 - Strom L1/L2/L3/Gesamt, Spannung L1/L2/L3 und Wirkleistung
   L1/L2/L3/Gesamt
@@ -36,6 +36,9 @@ Wichtig:
 - SQLite WAL, Größenüberwachung und älteste-Messwerte-zuerst-Bereinigung
 - Docker Compose mit Mosquitto und Caddy
 - Alembic, CI, Unit-, Integrations- und responsive Browser-Tests
+- Veröffentlichung fertiger Multi-Architecture-Images in GHCR und eigenständige
+  Produktionskonfiguration unter
+  [`deploy/production`](deploy/production/README.md)
 
 ## Architektur
 
@@ -144,7 +147,7 @@ Nach Anmeldung Burger-Menü → **Geräte** → Plus-Button:
 - Passwort oder automatisch erzeugtes Passwort
 - Sortierung, Farbe, aktiv/deaktiviert
 
-Ein automatisch erzeugtes Passwort wird nur einmal angezeigt. In 0.1.0 muss
+Ein automatisch erzeugtes Passwort wird nur einmal angezeigt. In 0.1.1 muss
 dieser Benutzer zusätzlich mit `mosquitto_passwd` in Mosquitto angelegt werden.
 Eine Umbenennung ändert die interne UUID und die historischen Daten nicht.
 
@@ -284,6 +287,19 @@ Die Browser-Tests decken 320×568, 390×844, 844×390, 768×1024, 1366×768,
 
 ## Update und Rollback
 
+Für Produktionsserver wird die eigenständige
+[`deploy/production`](deploy/production/README.md)-Konfiguration empfohlen. Sie
+zieht das freigegebene Image aus GHCR; Quellcode und lokaler Build sind auf dem
+Server nicht erforderlich:
+
+```bash
+docker compose pull
+docker compose up -d --remove-orphans
+```
+
+Die folgenden Befehle beschreiben weiterhin den quellcodebasierten
+Entwicklungsbetrieb.
+
 Update:
 
 ```powershell
@@ -318,7 +334,7 @@ Rollback:
 Setze in Produktion mindestens `GA_ENV=production` und
 `GA_COOKIE_SECURE=true`.
 
-## Bekannte Einschränkungen 0.1.0
+## Bekannte Einschränkungen 0.1.1
 
 - Mosquitto-Passwörter werden aus Sicherheitsgründen nicht durch eine öffentliche
   API geschrieben. Der Betreiber synchronisiert sie mit `mosquitto_passwd`.
