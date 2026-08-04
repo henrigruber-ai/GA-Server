@@ -1,0 +1,29 @@
+# File: .gitignore
+# Version: 0.1.0
+# Date: 2026-08-03
+# Purpose: Excludes local runtime data, secrets, caches, and generated artifacts.
+
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pip-audit-cache/
+.coverage
+htmlcov/
+data/
+backups/
+logs/
+debug.log
+certs/
+secrets/*
+!secrets/README.md
+mosquitto/data/
+mosquitto/log/
+mosquitto/config/passwords
+playwright-report/
+test-results/
+dist/
+*.egg-info/

@@ -1,0 +1,61 @@
+# File: .github/workflows/ci.yml
+# Version: 0.1.0
+# Date: 2026-08-03
+# Purpose: Validates formatting, types, tests, migrations, dependencies, and container builds.
+
+name: CI
+
+on:
+  push:
+    branches: ["main", "agent/**", "codex/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[dev]"
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: mypy app
+      - run: pytest -m "not e2e" --cov=app --cov-report=term-missing
+      - name: Verify migrations
+        env:
+          GA_DATABASE_URL: sqlite:///./migration-check.db
+        run: alembic upgrade head
+      - run: pip-audit
+      - name: Check common secret patterns
+        shell: pwsh
+        run: ./scripts/check-secrets.ps1
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: ga-server:ci
+
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m playwright install --with-deps chromium
+      - run: pytest -m e2e

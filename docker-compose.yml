@@ -1,0 +1,121 @@
+# File: docker-compose.yml
+# Version: 0.1.0
+# Date: 2026-08-03
+# Purpose: Runs GA-Server, private Mosquitto, and Caddy with persistent state and bounded logs.
+
+services:
+  ga-server:
+    build:
+      context: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      GA_DATABASE_URL: sqlite:////data/ga-server.db
+      GA_MQTT_HOST: mosquitto
+      GA_MQTT_PORT: "1883"
+      GA_MQTT_PASSWORD_FILE: /run/secrets/ga_mqtt_password
+    volumes:
+      - ga-data:/data
+    secrets:
+      - ga_mqtt_password
+    networks:
+      - backend
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    restart: unless-stopped
+    volumes:
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto/config/passwords:/mosquitto/config/passwords:ro
+      - ./certs/mqtt:/mosquitto/certs:ro
+      - mosquitto-data:/mosquitto/data
+      - mosquitto-log:/mosquitto/log
+    ports:
+      - "8883:8883"
+    expose:
+      - "1883"
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "mosquitto_sub", "-h", "127.0.0.1", "-p", "1883", "-t", "$$SYS/broker/uptime", "-C", "1", "-W", "3"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    security_opt:
+      - no-new-privileges:true
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    environment:
+      ACME_EMAIL: "${ACME_EMAIL:-operator@example.invalid}"
+    ports:
+      - "${GA_HTTP_PORT:-80}:80"
+      - "${GA_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - backend
+    depends_on:
+      ga-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  backend:
+    driver: bridge
+    internal: false
+
+volumes:
+  ga-data:
+  mosquitto-data:
+  mosquitto-log:
+  caddy-data:
+  caddy-config:
+
+secrets:
+  ga_mqtt_password:
+    file: ./secrets/ga_mqtt_password
