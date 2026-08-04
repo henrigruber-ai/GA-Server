@@ -97,8 +97,6 @@ docker run --rm -i --user 1883:1883 \
   eclipse-mosquitto:2.0.22 \
   sh -c 'IFS= read -r mqtt_value; mosquitto_passwd -b -c /mosquitto/config/passwords ga-server "$mqtt_value"' \
   <"$runtime_dir/secrets/ga_mqtt_password"
-chmod 0644 "$runtime_dir/mqtt/config/passwords"
-[[ -s "$runtime_dir/mqtt/config/passwords" ]]
 
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
   -subj "${openssl_subject_prefix}CN=GA-Server CI CA" \
