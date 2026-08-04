@@ -1,10 +1,11 @@
 """
 File: app/api/routes_health.py
-Version: 0.1.0
-Date: 2026-08-03
+Version: 0.1.1
+Date: 2026-08-04
 Purpose: Provides secret-free liveness and readiness probes.
 Changes:
 - 0.1.0: Initial implementation.
+- 0.1.1: Requires an active MQTT connection when MQTT is enabled.
 """
 
 from pathlib import Path
@@ -30,6 +31,7 @@ def ready(request: Request, response: Response) -> dict[str, object]:
         "database": database_ok,
         "schema": database_ok,
         "mqtt_initialized": runtime.mqtt.initialized,
+        "mqtt_connected": not runtime.settings.mqtt_enabled or runtime.mqtt.connected,
         "data_directory": writable,
     }
     ready_state = all(checks.values())

@@ -1,0 +1,22 @@
+# File: deploy/production/Caddyfile
+# Version: 0.1.1
+# Date: 2026-08-04
+# Purpose: Terminates public HTTPS and proxies HTTP and WebSocket traffic to GA-Server.
+{
+	email {$ACME_EMAIL}
+	admin localhost:2019
+}
+
+{$GA_PUBLIC_BASE_URL} {
+	encode zstd gzip
+	reverse_proxy ga-server:8000
+	header {
+		-Server
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "same-origin"
+	}
+	log {
+		output stdout
+		format json
+	}
+}

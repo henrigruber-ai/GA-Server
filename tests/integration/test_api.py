@@ -1,10 +1,11 @@
 """
 File: tests/integration/test_api.py
-Version: 0.1.0
-Date: 2026-08-03
+Version: 0.1.1
+Date: 2026-08-04
 Purpose: Exercises public access, auth, CSRF, device lifecycle, history, and WebSockets.
 Changes:
 - 0.1.0: Initial implementation.
+- 0.1.1: Verifies readiness when MQTT is intentionally disabled.
 """
 
 from datetime import UTC, datetime
@@ -34,7 +35,9 @@ def test_public_page_health_and_protected_access(client: TestClient) -> None:
     assert client.get("/").status_code == 200
     assert "historyCanvas" in client.get("/").text
     assert client.get("/health/live").json() == {"status": "alive"}
-    assert client.get("/health/ready").status_code == 200
+    ready = client.get("/health/ready")
+    assert ready.status_code == 200
+    assert ready.json()["checks"]["mqtt_connected"] is True
     assert client.get("/api/public/devices").status_code == 200
     assert client.get("/api/admin/devices").status_code == 401
 

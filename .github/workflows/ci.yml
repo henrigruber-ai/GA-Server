@@ -1,6 +1,6 @@
 # File: .github/workflows/ci.yml
-# Version: 0.1.0
-# Date: 2026-08-03
+# Version: 0.1.1
+# Date: 2026-08-04
 # Purpose: Validates formatting, types, tests, migrations, dependencies, and container builds.
 
 name: CI
@@ -45,8 +45,13 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
+          load: true
           push: false
           tags: ga-server:ci
+      - name: Validate the production stack
+        env:
+          GA_SERVER_TEST_IMAGE: ga-server:ci
+        run: ./scripts/test-production-stack.sh
 
   browser:
     runs-on: ubuntu-latest

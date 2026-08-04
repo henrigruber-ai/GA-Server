@@ -1,7 +1,7 @@
 <!--
 File: deploy/gcp/README.md
-Version: 0.1.0
-Date: 2026-08-03
+Version: 0.1.1
+Date: 2026-08-04
 Purpose: Provides a complete small-VM deployment, backup, update, rollback, and recovery runbook.
 -->
 
@@ -63,10 +63,11 @@ sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plug
 sudo usermod -aG docker "$USER"
 ```
 
-Danach neu anmelden. Repository beispielsweise unter `/opt/ga-server` auschecken.
-Die persistente Disk unter `/srv/ga-data` formatieren, per UUID in `/etc/fstab`
-eintragen und Docker-Volumes oder Bind-Mounts dorthin legen. Vor dem Formatieren
-den exakten Gerätenamen mit `lsblk` prüfen.
+Danach neu anmelden. Für den Betrieb genügt der eigenständige Ordner
+[`deploy/production`](../production/README.md); Python-Quellcode und lokaler
+Image-Build werden auf der VM nicht benötigt. Die persistente Disk unter
+`/srv/ga-server` einhängen und per UUID in `/etc/fstab` eintragen. Vor dem
+Formatieren den exakten Gerätenamen mit `lsblk` prüfen.
 
 ## Secrets und Zertifikate
 
@@ -83,37 +84,39 @@ Für Mosquitto wird ein eigenes Serverzertifikat benötigt, dessen SAN
 3. Interne CA nur, wenn deren Root-Zertifikat sicher auf allen Shellys installiert
    werden kann.
 
-Dateien mit restriktiven Rechten:
+Dateien mit restriktiven Rechten unter der Produktionsbasis:
 
 ```text
-certs/mqtt/ca.crt
-certs/mqtt/server.crt
-certs/mqtt/server.key
-secrets/ga_mqtt_password
-mosquitto/config/passwords
+/srv/ga-server/mqtt/certs/ca.crt
+/srv/ga-server/mqtt/certs/server.crt
+/srv/ga-server/mqtt/certs/server.key
+/srv/ga-server/secrets/ga_mqtt_password
+/srv/ga-server/mqtt/config/passwords
 ```
 
-Private Schlüssel, `.env` und Passwörter nie committen. MQTT-Benutzer:
-
-```bash
-docker run --rm -it \
-  -v "$PWD/mosquitto/config:/mosquitto/config" \
-  eclipse-mosquitto:2.0 \
-  mosquitto_passwd /mosquitto/config/passwords shelly-roemerbad
-```
+Private Schlüssel, `.env` und Passwörter nie committen. Das Erzeugen des
+internen GA-Server-Zugangs und weiterer MQTT-Benutzer ist in der
+[Produktionsanleitung](../production/README.md#mqtt-zugang-vorbereiten)
+beschrieben.
 
 ## Produktionsstart
 
 ```bash
+cd /opt/ga-server-production
 cp .env.example .env
-chmod 600 .env secrets/ga_mqtt_password mosquitto/config/passwords certs/mqtt/server.key
-sudo chown 1883:1883 mosquitto/config/passwords certs/mqtt/server.key
+nano .env
+chmod 600 .env
 docker compose config
-docker compose build --pull
+docker compose pull
 docker compose up -d
 docker compose ps
 curl --fail https://strom.gruber-automation.de/health/ready
 ```
+
+Die konkreten Verzeichnis-, Besitzer- und Zertifikatsbefehle stehen in
+[`deploy/production/README.md`](../production/README.md). Die obigen relativen
+Pfade sind nur eine Kurzform; produktiv liegen die Dateien standardmäßig unter
+`/srv/ga-server`.
 
 Ersten Administrator anlegen:
 
@@ -188,21 +191,22 @@ Restore mindestens vierteljährlich auf einer separaten VM testen.
 ## Update
 
 ```bash
-./scripts/backup.sh
-git fetch --prune
-git checkout <signierter-release-tag>
-docker compose build --pull
-docker compose run --rm ga-server alembic upgrade head
-docker compose up -d
+docker compose pull
+docker compose up -d --remove-orphans
+docker compose ps
 curl --fail https://strom.gruber-automation.de/health/ready
 ```
 
-Vor jedem Update Release Notes und Migrationen lesen.
+Vor jedem Update Release Notes und Migrationen lesen und ein konsistentes
+SQLite-Backup erstellen. Ein `git pull` ist nur nötig, wenn sich die
+Deployment-Konfiguration selbst geändert hat.
 
 ## Rollback
 
 - vorheriges Image/Tag und Datenbankbackup bereithalten
-- bei reinem Anwendungscode vorheriges Tag starten
+- in `.env` beispielsweise
+  `GA_SERVER_IMAGE=ghcr.io/henrigruber-ai/ga-server:0.1.1` setzen
+- `docker compose pull && docker compose up -d --remove-orphans` ausführen
 - nach nicht rückwärtskompatibler Migration das zugehörige Backup restaurieren
 - nie blind `alembic downgrade` in Produktion ausführen
 - anschließend Healthchecks, MQTT-Eingang und öffentliche Darstellung prüfen
