@@ -1,0 +1,15 @@
+# File: deploy/gcp/terraform/terraform.tfvars.example
+# Version: 0.1.0
+# Date: 2026-08-04
+# Purpose: Provides a safe copy template for the GA-Server Terraform variables.
+
+project_id     = "replace-with-gcp-project-id"
+region         = "europe-west3"
+zone           = "europe-west3-a"
+instance_name  = "ga-server-01"
+machine_type   = "e2-small"
+repository_ref = "agent/gcp-infrastructure"
+
+admin_members = [
+  "user:replace-with-admin@example.com",
+]
