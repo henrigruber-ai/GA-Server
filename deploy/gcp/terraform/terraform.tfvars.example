@@ -1,0 +1,49 @@
+# File: deploy/gcp/terraform/terraform.tfvars.example
+# Version: 0.1.2
+# Date: 2026-08-04
+# Purpose: Safely references the partially existing production environment without creating duplicates.
+
+project_id = "gruber-ga-server-prod"
+region     = "europe-west3"
+zone       = "<ZONE>"
+
+manage_project_services = false
+
+create_network        = false
+existing_network_name = "ga-server-vpc"
+
+create_subnetwork        = false
+existing_subnetwork_name = "<SUBNET_NAME>"
+
+create_service_account          = false
+existing_service_account_email = "ga-server-vm@gruber-ga-server-prod.iam.gserviceaccount.com"
+manage_runtime_iam              = false
+
+create_static_ip          = false
+existing_static_ip_name  = "<STATIC_IP_NAME>"
+existing_static_ip_address = "<STATIC_IP_ADDRESS>"
+
+create_firewall_rules = false
+manage_admin_iam      = false
+admin_members         = []
+
+create_data_disk        = false
+existing_data_disk_name = "<DATA_DISK_NAME>"
+allow_data_disk_format  = false
+
+create_snapshot_policy = false
+enable_gcs_backups     = false
+
+create_mqtt_secret        = false
+existing_mqtt_secret_name = "<MQTT_SECRET_NAME>"
+
+# Keep false to reference a manually managed VM without adding it to Terraform state.
+# Set true only for a new VM or before importing <VM_NAME> into the documented address.
+create_instance        = false
+existing_instance_name = "<VM_NAME>"
+
+deployment_source_ref = "v0.1.2"
+image_tag              = "0.1.2"
+public_base_url        = "https://<PUBLIC_HOSTNAME>"
+mqtt_public_host       = "<MQTT_HOSTNAME>"
+acme_email             = "<ACME_EMAIL>"

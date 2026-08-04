@@ -1,11 +1,11 @@
 <!--
 File: README.md
-Version: 0.1.1
+Version: 0.1.2
 Date: 2026-08-04
 Purpose: Explains installation, operation, Shelly configuration, security, tests, and recovery.
 -->
 
-# GA-Server 0.1.1
+# GA-Server 0.1.2
 
 GA-Server empfängt elektrische Messwerte mehrerer Shelly Pro 3EM, fasst sie zu
 Minutenwerten zusammen und zeigt sie als öffentlichen, bildschirmfüllenden
@@ -19,7 +19,7 @@ Wichtig:
 - Ein Shelly darf **nicht** die HTTPS-Adresse als MQTT-Server verwenden.
 - Port 1883 bleibt im Docker-Netz und wird nicht öffentlich freigegeben.
 
-## Funktionsumfang 0.1.1
+## Funktionsumfang 0.1.2
 
 - Strom L1/L2/L3/Gesamt, Spannung L1/L2/L3 und Wirkleistung
   L1/L2/L3/Gesamt
@@ -39,6 +39,8 @@ Wichtig:
 - Veröffentlichung fertiger Multi-Architecture-Images in GHCR und eigenständige
   Produktionskonfiguration unter
   [`deploy/production`](deploy/production/README.md)
+- reproduzierbare GCP-Infrastruktur mit sicherer Wiederverwendung und
+  Importmöglichkeit für bestehende Ressourcen
 
 ## Architektur
 
@@ -147,7 +149,7 @@ Nach Anmeldung Burger-Menü → **Geräte** → Plus-Button:
 - Passwort oder automatisch erzeugtes Passwort
 - Sortierung, Farbe, aktiv/deaktiviert
 
-Ein automatisch erzeugtes Passwort wird nur einmal angezeigt. In 0.1.1 muss
+Ein automatisch erzeugtes Passwort wird nur einmal angezeigt. In 0.1.2 muss
 dieser Benutzer zusätzlich mit `mosquitto_passwd` in Mosquitto angelegt werden.
 Eine Umbenennung ändert die interne UUID und die historischen Daten nicht.
 
@@ -334,7 +336,7 @@ Rollback:
 Setze in Produktion mindestens `GA_ENV=production` und
 `GA_COOKIE_SECURE=true`.
 
-## Bekannte Einschränkungen 0.1.1
+## Bekannte Einschränkungen 0.1.2
 
 - Mosquitto-Passwörter werden aus Sicherheitsgründen nicht durch eine öffentliche
   API geschrieben. Der Betreiber synchronisiert sie mit `mosquitto_passwd`.

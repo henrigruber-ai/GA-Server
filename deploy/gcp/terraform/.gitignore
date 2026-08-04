@@ -1,0 +1,12 @@
+# File: deploy/gcp/terraform/.gitignore
+# Version: 0.1.0
+# Date: 2026-08-04
+# Purpose: Prevents local Terraform state, plans and private variables from being committed.
+
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+terraform.tfvars

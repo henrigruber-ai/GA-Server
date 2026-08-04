@@ -1,5 +1,5 @@
 # File: .github/workflows/publish-image.yml
-# Version: 0.1.1
+# Version: 0.1.2
 # Date: 2026-08-04
 # Purpose: Tests and publishes traceable multi-architecture GA-Server images to GHCR.
 

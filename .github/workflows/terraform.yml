@@ -1,0 +1,98 @@
+# File: .github/workflows/terraform.yml
+# Version: 0.1.2
+# Date: 2026-08-04
+# Purpose: Validates Terraform and bootstrap safety without accessing or changing GCP.
+
+name: Terraform and GCP bootstrap
+
+on:
+  pull_request:
+    paths:
+      - "deploy/gcp/**"
+      - "deploy/production/**"
+      - "scripts/check-secrets.ps1"
+      - ".github/workflows/terraform.yml"
+  push:
+    branches: ["main", "agent/**", "codex/**"]
+    paths:
+      - "deploy/gcp/**"
+      - "deploy/production/**"
+      - "scripts/check-secrets.ps1"
+      - ".github/workflows/terraform.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: deploy/gcp/terraform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.10.5"
+      - uses: terraform-linters/setup-tflint@v6
+        with:
+          tflint_version: "v0.61.0"
+      - run: terraform fmt -check -recursive
+      - run: terraform init -backend=false
+      - run: terraform validate
+      - name: Prove the reference-only example creates no resources
+        env:
+          GOOGLE_OAUTH_ACCESS_TOKEN: ci-validation-only-not-a-real-token
+        run: |
+          terraform plan \
+            -refresh=false \
+            -input=false \
+            -lock=false \
+            -var-file=terraform.tfvars.example \
+            -out=/tmp/reference-only.tfplan
+          resource_actions="$(
+            terraform show -json /tmp/reference-only.tfplan |
+              jq '[.resource_changes[]? | select(.change.actions != ["no-op"])] | length'
+          )"
+          test "$resource_actions" -eq 0
+      - run: tflint --init
+      - run: tflint --recursive
+
+  shell-and-secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate bootstrap shell
+        run: |
+          bash -n deploy/gcp/bootstrap.sh
+          shellcheck deploy/gcp/bootstrap.sh
+          sed \
+            -e 's/\$\${/${/g' \
+            -e 's/${[a-z_]*_b64}/dmFsaWQ=/g' \
+            -e 's/${allow_disk_format}/false/g' \
+            deploy/gcp/terraform/startup.sh.tftpl > /tmp/startup.sh
+          bash -n /tmp/startup.sh
+          shellcheck /tmp/startup.sh
+      - name: Check common secret patterns
+        shell: pwsh
+        run: ./scripts/check-secrets.ps1
+      - name: Assert image-only production invariants
+        env:
+          GA_PUBLIC_BASE_URL: https://example.invalid
+          GA_MQTT_PUBLIC_HOST: mqtt.example.invalid
+          ACME_EMAIL: operator@example.invalid
+        run: |
+          if grep -R -E \
+            --exclude='README.md' \
+            'docker compose build|docker-compose\.gcp|/srv/ga-data|git (clone|pull)' \
+            deploy/gcp; then
+            echo "Legacy GCP deployment mechanism detected." >&2
+            exit 1
+          fi
+          docker compose -f deploy/production/docker-compose.yml config \
+            > /tmp/production-compose.yml
+          if grep -E 'published: "?((1883)|(8000)|(2019))"?' \
+            /tmp/production-compose.yml; then
+            echo "Internal service port is publicly published." >&2
+            exit 1
+          fi

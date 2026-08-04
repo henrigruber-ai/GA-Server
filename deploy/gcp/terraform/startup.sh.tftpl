@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# File: deploy/gcp/terraform/startup.sh.tftpl
+# Version: 0.1.2
+# Date: 2026-08-04
+# Purpose: Fetches and runs the versioned idempotent GCP bootstrap without cloning source.
+
+set -Eeuo pipefail
+
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y ca-certificates curl
+
+decode() {
+  printf '%s' "$1" | base64 --decode
+}
+
+export GA_PROJECT_ID
+export GA_DATA_DEVICE_NAME
+export GA_ALLOW_DATA_DISK_FORMAT
+export GA_DEPLOYMENT_SOURCE_BASE_URL
+export GA_DEPLOYMENT_SOURCE_REF
+export GA_SERVER_IMAGE_TAG
+export GA_MQTT_SECRET_NAME
+export GA_PUBLIC_BASE_URL
+export GA_MQTT_PUBLIC_HOST
+export GA_ACME_EMAIL
+
+GA_PROJECT_ID="$(decode '${project_id_b64}')"
+GA_DATA_DEVICE_NAME="$(decode '${data_device_name_b64}')"
+GA_ALLOW_DATA_DISK_FORMAT="${allow_disk_format}"
+GA_DEPLOYMENT_SOURCE_BASE_URL="$(decode '${deployment_base_url_b64}')"
+GA_DEPLOYMENT_SOURCE_REF="$(decode '${deployment_ref_b64}')"
+GA_SERVER_IMAGE_TAG="$(decode '${image_tag_b64}')"
+GA_MQTT_SECRET_NAME="$(decode '${mqtt_secret_name_b64}')"
+GA_PUBLIC_BASE_URL="$(decode '${public_base_url_b64}')"
+GA_MQTT_PUBLIC_HOST="$(decode '${mqtt_host_b64}')"
+GA_ACME_EMAIL="$(decode '${acme_email_b64}')"
+
+bootstrap_url="$${GA_DEPLOYMENT_SOURCE_BASE_URL}/$${GA_DEPLOYMENT_SOURCE_REF}/deploy/gcp/bootstrap.sh"
+bootstrap_tmp="$(mktemp)"
+trap 'rm -f "$${bootstrap_tmp}"' EXIT
+
+curl -fsSL --retry 5 --retry-delay 2 "$${bootstrap_url}" -o "$${bootstrap_tmp}"
+install -o root -g root -m 0755 "$${bootstrap_tmp}" /usr/local/sbin/ga-server-bootstrap
+
+/usr/local/sbin/ga-server-bootstrap
