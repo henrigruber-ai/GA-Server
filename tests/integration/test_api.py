@@ -1,7 +1,7 @@
 """
 File: tests/integration/test_api.py
-Version: 0.2.0
-Date: 2026-08-04
+Version: 0.3.0
+Date: 2026-08-06
 Purpose: Exercises public access, auth, CSRF, device lifecycle, history, and WebSockets.
 Changes:
 - 0.1.0: Initial implementation.
@@ -77,7 +77,8 @@ def test_device_create_rename_disable_and_identity_stability(
     )
     assert created.status_code == 201
     device_id = created.json()["id"]
-    assert created.json()["generated_mqtt_password"]
+    assert "generated_mqtt_password" not in created.json()
+    assert "mqtt_password" not in created.json()
     renamed = client.patch(
         f"/api/admin/devices/{device_id}",
         json={"name": "Neue Werkstatt"},

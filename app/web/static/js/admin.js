@@ -1,10 +1,11 @@
 /*
 File: app/web/static/js/admin.js
-Version: 0.1.0
-Date: 2026-08-03
-Purpose: Renders authenticated device, MQTT, storage, system, user, and version administration.
+Version: 0.3.0
+Date: 2026-08-06
+Purpose: Renders authenticated device, plug, MQTT, storage, system, user, and version administration.
 Changes:
 - 0.1.0: Initial implementation.
+- 0.3.0: Adds device-type-aware forms and the protected plug navigation entry.
 */
 
 (() => {
@@ -55,6 +56,7 @@ Changes:
   }
 
   function close() {
+    window.GAControl.destroy();
     drawer.classList.add("hidden");
     drawer.setAttribute("aria-hidden", "true");
     document.querySelector("#menuButton").setAttribute("aria-expanded", "false");
@@ -62,12 +64,14 @@ Changes:
 
   async function showPanel(panel) {
     state.panel = panel;
+    if (panel !== "plugs") window.GAControl.destroy();
     navigation.querySelectorAll("[data-panel]").forEach((button) => {
       button.classList.toggle("active", button.dataset.panel === panel);
     });
     content.innerHTML = '<p class="muted">Lade Daten …</p>';
     try {
       if (panel === "overview") await renderOverview();
+      if (panel === "plugs") await window.GAControl.render(content, state.csrf);
       if (panel === "devices") await renderDevices();
       if (panel === "mqtt") await renderMqtt();
       if (panel === "storage") await renderStorage();
@@ -122,9 +126,10 @@ Changes:
         <dl class="key-value">
           <dt>Status</dt><dd>${escapeHtml(device.status)}${device.enabled ? "" : " · deaktiviert"}</dd>
           <dt>Geräte-ID</dt><dd>${escapeHtml(device.technical_device_id)}</dd>
-          <dt>Topic</dt><dd>${escapeHtml(device.mqtt_topic_prefix)}/status/em:0</dd>
+          <dt>Geräteart</dt><dd>${device.device_type === "tasmota_plug" ? "Tasmota-Steckdose" : "Shelly Pro 3EM"}</dd>
+          <dt>Topic</dt><dd>${escapeHtml(device.mqtt_topic_prefix)}${device.device_type === "tasmota_plug" ? "" : "/status/em:0"}</dd>
           <dt>Letzte Nachricht</dt><dd>${formatDate(device.last_seen_at)}</dd>
-          <dt>MQTT-Passwort</dt><dd>${device.mqtt_password_configured ? "gesetzt" : "nicht gesetzt"}</dd>
+          <dt>Steuerbar</dt><dd>${device.controllable ? "ja" : "nein"}</dd>
         </dl>
         <div class="device-actions">
           <button class="secondary-button" type="button" data-edit="${device.id}">Bearbeiten</button>
@@ -151,15 +156,31 @@ Changes:
     document.querySelector("#deviceDialogTitle").textContent = device ? "Gerät bearbeiten" : "Gerät hinzufügen";
     if (device) {
       Object.entries(device).forEach(([key, value]) => {
-        if (!deviceForm.elements[key] || key === "mqtt_password") return;
+        if (!deviceForm.elements[key]) return;
         if (deviceForm.elements[key].type === "checkbox") deviceForm.elements[key].checked = Boolean(value);
         else deviceForm.elements[key].value = value ?? "";
       });
     } else {
       deviceForm.elements.id.value = "";
       deviceForm.elements.enabled.checked = true;
+      deviceForm.elements.device_type.value = "shelly_pro_3em";
+      deviceForm.elements.relay_index.value = "1";
     }
+    updateDeviceTypeFields();
     deviceDialog.showModal();
+  }
+
+  function updateDeviceTypeFields() {
+    const tasmota = deviceForm.elements.device_type.value === "tasmota_plug";
+    document.querySelector("#deviceTopicLabel").textContent = tasmota
+      ? "MQTT-Gerätetopic"
+      : "MQTT-Topic-Präfix";
+    document.querySelector("#deviceTopicHelp").textContent = tasmota
+      ? "Nur das nackte Topic, zum Beispiel id139_bauwagen"
+      : "Zum Beispiel ga/devices/werkstatt";
+    deviceForm.elements.controllable.disabled = !tasmota;
+    if (!tasmota) deviceForm.elements.controllable.checked = false;
+    deviceForm.elements.relay_index.disabled = !tasmota;
   }
 
   async function submitDevice(event) {
@@ -168,8 +189,9 @@ Changes:
     const id = data.id;
     delete data.id;
     data.enabled = deviceForm.elements.enabled.checked;
+    data.controllable = deviceForm.elements.controllable.checked;
     data.sort_order = Number(data.sort_order || 0);
-    if (!data.mqtt_password) delete data.mqtt_password;
+    data.relay_index = Number(data.relay_index || 1);
     try {
       const result = await request(id ? `/api/admin/devices/${id}` : "/api/admin/devices", {
         method: id ? "PATCH" : "POST",
@@ -177,9 +199,7 @@ Changes:
         body: JSON.stringify(data),
       });
       deviceDialog.close();
-      if (result.generated_mqtt_password) {
-        showToast(`MQTT-Passwort (nur jetzt sichtbar): ${result.generated_mqtt_password}`, 12000);
-      } else showToast("Gerät gespeichert.");
+      showToast("Gerät gespeichert.");
       await renderDevices();
       window.GAApp.loadDevices();
       window.GAApp.loadHistory();
@@ -371,6 +391,7 @@ Changes:
   drawer.addEventListener("pointerdown", (event) => {
     if (event.target === drawer) close();
   });
+  deviceForm.elements.device_type.addEventListener("change", updateDeviceTypeFields);
   deviceForm.addEventListener("submit", submitDevice);
   confirmForm.addEventListener("submit", submitDelete);
 

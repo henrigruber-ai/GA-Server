@@ -1,15 +1,18 @@
 /*
 File: app/web/static/js/app.js
-Version: 0.2.0
-Date: 2026-08-04
-Purpose: Coordinates the hierarchical series legend, bundled history, raw live values, and auth.
+Version: 0.3.0
+Date: 2026-08-06
+Purpose: Coordinates the GA legend, resilient history refresh, raw live values, and auth.
 Changes:
 - 0.1.0: Initial implementation.
 - 0.2.0: Adds independent multi-series selection, persistent legend state, and raw live values.
+- 0.3.0: Makes GA the initial-closed legend control and preserves valid history on empty refreshes.
 */
 
 (() => {
   "use strict";
+
+  if (window.GAApp?.initialized) return;
 
   const STORAGE_KEY = "ga.monitor.selection.v2";
   const METRICS = {
@@ -27,7 +30,7 @@ Changes:
     latest: new Map(),
     selected: new Set(saved?.selected || []),
     expanded: new Set(saved?.expanded || []),
-    legendCollapsed: saved?.legendCollapsed === true,
+    legendOpen: false,
     hasSavedSelection: Boolean(saved),
     visuals: new Map(),
     socket: null,
@@ -38,6 +41,7 @@ Changes:
     historyTimer: null,
     liveTimer: null,
     destroyed: false,
+    historyRefreshCount: 0,
   };
 
   const canvas = document.querySelector("#historyCanvas");
@@ -46,7 +50,6 @@ Changes:
     onZoomChange: (zoomed) => document.querySelector("#zoomReset").classList.toggle("hidden", !zoomed),
   });
   const legend = document.querySelector("#deviceLegend");
-  const legendBody = document.querySelector("#legendBody");
   const legendRows = document.querySelector("#legendRows");
   const legendToggle = document.querySelector("#legendToggle");
   const menuButton = document.querySelector("#menuButton");
@@ -67,7 +70,6 @@ Changes:
       return {
         selected: parsed.selected.filter((value) => typeof value === "string"),
         expanded: parsed.expanded.filter((value) => typeof value === "string"),
-        legendCollapsed: parsed.legendCollapsed === true,
       };
     } catch {
       return null;
@@ -82,7 +84,6 @@ Changes:
           version: 2,
           selected: [...state.selected],
           expanded: [...state.expanded],
-          legendCollapsed: state.legendCollapsed,
         }),
       );
     } catch {
@@ -173,14 +174,19 @@ Changes:
     }
     const request = fetchJson(`/api/public/history-batch?${query}`)
       .then((data) => {
+        if (!Array.isArray(data.series)) throw new Error("Invalid history response");
         const series = (data.series || []).map((item) => ({
           ...item,
           ...state.visuals.get(item.key),
         }));
-        if (state.historyCursor) chart.mergeSeries(series);
-        else chart.setSeries(series);
+        const hasPoints = series.some((item) => item.points?.length);
+        if (hasPoints) {
+          if (state.historyCursor) chart.mergeSeries(series);
+          else chart.setSeries(series);
+          state.historyRefreshCount += 1;
+        }
         const cursor = new Date(data.to).getTime();
-        if (Number.isFinite(cursor)) state.historyCursor = cursor;
+        if (hasPoints && Number.isFinite(cursor)) state.historyCursor = cursor;
         updateChartSelection();
       })
       .finally(() => {
@@ -212,7 +218,6 @@ Changes:
     legendRows.replaceChildren();
     document.querySelector("#legendCount").textContent = String(state.devices.length);
     state.devices.forEach((device) => legendRows.append(createDeviceGroup(device)));
-    applyLegendCollapsedState();
     updateLiveValues();
   }
 
@@ -246,7 +251,11 @@ Changes:
     const status = document.createElement("span");
     status.className = `device-state ${device.status}`;
     status.title = device.status;
-    header.append(disclosure, checkbox, name, status);
+    const live = document.createElement("output");
+    live.className = "legend-device-live";
+    live.dataset.deviceId = device.id;
+    live.setAttribute("aria-label", `Aktueller Stromwert ${device.name}`);
+    header.append(disclosure, checkbox, name, live, status);
     group.append(header);
 
     const content = document.createElement("div");
@@ -354,14 +363,21 @@ Changes:
     updateChartSelection();
   }
 
-  function applyLegendCollapsedState() {
-    legend.classList.toggle("collapsed", state.legendCollapsed);
-    legendBody.hidden = state.legendCollapsed;
-    legendToggle.setAttribute("aria-expanded", String(!state.legendCollapsed));
-    legendToggle.querySelector(".legend-triangle").textContent = state.legendCollapsed ? "▸" : "▾";
+  function applyLegendState() {
+    legend.classList.toggle("hidden", !state.legendOpen);
+    legendToggle.setAttribute("aria-expanded", String(state.legendOpen));
+    legendToggle.setAttribute(
+      "aria-label",
+      state.legendOpen ? "Diagrammlegende schließen" : "Diagrammlegende öffnen",
+    );
   }
 
   function updateLiveValues() {
+    document.querySelectorAll(".legend-device-live").forEach((output) => {
+      const measurement = state.latest.get(output.dataset.deviceId);
+      const value = measurement?.values?.current_total ?? measurement?.values?.current_l1;
+      output.textContent = Number.isFinite(value) ? formatLive(value, "current") : "–";
+    });
     document.querySelectorAll(".legend-live-value").forEach((output) => {
       const measurement = state.latest.get(output.dataset.deviceId);
       const value = measurement?.values?.[`${output.dataset.metric}_${output.dataset.phase}`];
@@ -399,6 +415,7 @@ Changes:
 
   function connectLive() {
     if (state.destroyed) return;
+    if (state.socket && [WebSocket.CONNECTING, WebSocket.OPEN].includes(state.socket.readyState)) return;
     clearTimeout(state.reconnectTimer);
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
     state.socket = new WebSocket(`${protocol}//${location.host}/api/public/live-stream`);
@@ -408,7 +425,12 @@ Changes:
       setConnection("online", "Live verbunden");
     });
     state.socket.addEventListener("message", (event) => {
-      const message = JSON.parse(event.data);
+      let message;
+      try {
+        message = JSON.parse(event.data);
+      } catch {
+        return;
+      }
       if (message.type === "snapshot") {
         message.data.forEach((measurement) => state.latest.set(measurement.device_id, measurement));
       } else if (message.type === "measurement") {
@@ -416,7 +438,9 @@ Changes:
       }
       updateLiveValues();
     });
+    const socket = state.socket;
     state.socket.addEventListener("close", () => {
+      if (state.socket !== socket) return;
       if (state.destroyed) return;
       setConnection("offline", "Verbindung getrennt");
       state.reconnectTimer = setTimeout(connectLive, state.reconnectDelay);
@@ -469,9 +493,8 @@ Changes:
   }
 
   legendToggle.addEventListener("click", () => {
-    state.legendCollapsed = !state.legendCollapsed;
-    applyLegendCollapsedState();
-    saveState();
+    state.legendOpen = !state.legendOpen;
+    applyLegendState();
   });
   legend.addEventListener("wheel", (event) => event.stopPropagation(), { passive: true });
   document.querySelector("#zoomReset").addEventListener("click", () => chart.resetZoom());
@@ -502,7 +525,7 @@ Changes:
     { once: true },
   );
 
-  applyLegendCollapsedState();
+  applyLegendState();
   Promise.all([loadDevices(), fetchJson("/api/public/live")])
     .then(([, live]) => {
       live.measurements.forEach((measurement) => state.latest.set(measurement.device_id, measurement));
@@ -512,12 +535,16 @@ Changes:
     .catch(showPublicError);
   connectLive();
   state.liveTimer = setInterval(updateLiveValues, 1000);
-  state.historyTimer = setInterval(() => loadHistory().catch(showPublicError), 10_000);
+  const historyInterval = Math.max(50, Number(window.GA_TEST_HISTORY_INTERVAL_MS) || 10_000);
+  state.historyTimer = setInterval(() => loadHistory().catch(showPublicError), historyInterval);
 
   window.GAApp = {
+    initialized: true,
     fetchJson,
     loadDevices,
     loadHistory,
     getSelection: () => new Set(state.selected),
+    getVisibleSeriesCount: () => chart.activeItems().filter((item) => item.points.length).length,
+    getHistoryRefreshCount: () => state.historyRefreshCount,
   };
 })();

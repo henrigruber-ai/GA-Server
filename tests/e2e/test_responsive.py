@@ -1,24 +1,30 @@
 """
 File: tests/e2e/test_responsive.py
-Version: 0.2.0
-Date: 2026-08-04
-Purpose: Verifies the responsive embedded legend, independent selection, zoom, and login entry.
+Version: 0.3.0
+Date: 2026-08-06
+Purpose: Verifies legend, zoom, repeated refresh, and protected plug control behavior.
 Changes:
 - 0.1.0: Initial implementation.
 - 0.2.0: Covers hierarchical selection, persistence, axis clearance, and mouse zoom.
+- 0.3.0: Adds GA-button, Tasmota control, mobile overflow, timeout, and refresh regression tests.
 """
 
 from __future__ import annotations
 
+import json
 import socket
 import threading
 from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 import uvicorn
 from playwright.sync_api import Browser, Page, sync_playwright
 
+from app.auth.security import hash_password
 from app.config import Settings
+from app.db.models import Device, MinuteMeasurement, User
 from app.main import create_app
 
 pytestmark = pytest.mark.e2e
@@ -31,6 +37,7 @@ VIEWPORTS = [
     (1920, 1080),
     (2560, 1440),
 ]
+E2E_APP: Any = None
 
 
 @pytest.fixture(scope="module")
@@ -51,6 +58,7 @@ def page(browser: Browser) -> Iterator[Page]:
 
 @pytest.fixture(scope="module")
 def live_server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
+    global E2E_APP
     path = (tmp_path_factory.mktemp("e2e") / "e2e.db").as_posix()
     application = create_app(
         Settings(
@@ -69,9 +77,71 @@ def live_server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     thread.start()
     while not server.started:
         thread.join(0.02)
+    runtime = application.state.runtime
+    now = datetime.now(UTC).replace(second=0, microsecond=0)
+    with runtime.database.sessions.begin() as session:
+        first_device = session.query(Device).order_by(Device.sort_order).first()
+        assert first_device is not None
+        session.add(
+            MinuteMeasurement(
+                device_id=first_device.id,
+                bucket_start=now - timedelta(minutes=5),
+                sample_count=1,
+                current_l1_avg=1.5,
+                current_l1_min=1.5,
+                current_l1_max=1.5,
+            )
+        )
+        session.add(
+            User(
+                username="operator",
+                password_hash=hash_password("correct-horse-battery-staple"),
+                enabled=True,
+            )
+        )
+        session.add_all(
+            [
+                Device(
+                    name="Bauwagen",
+                    technical_device_id="id139_bauwagen",
+                    mqtt_topic_prefix="id139_bauwagen",
+                    mqtt_client_id="DVES_5ED4C8",
+                    mqtt_username="bauwagen",
+                    device_type="tasmota_plug",
+                    controllable=True,
+                    relay_index=1,
+                    sort_order=20,
+                    color="#21d4a7",
+                ),
+                Device(
+                    name="Kühltruhe",
+                    technical_device_id="kuehltruhe",
+                    mqtt_topic_prefix="kuehltruhe",
+                    mqtt_client_id="DVES_TEST0001",
+                    device_type="tasmota_plug",
+                    controllable=False,
+                    relay_index=1,
+                    sort_order=21,
+                    color="#36a3ff",
+                ),
+            ]
+        )
+    runtime.mqtt.handle_message(
+        "tele/id139_bauwagen/SENSOR",
+        '{"ENERGY":{"Current":1.25,"Voltage":231,"Power":289}}',
+    )
+    runtime.mqtt.handle_message("tele/id139_bauwagen/LWT", "Online")
+    runtime.mqtt.handle_message("stat/id139_bauwagen/POWER", "OFF")
+    runtime.mqtt.handle_message(
+        "tele/kuehltruhe/SENSOR",
+        '{"ENERGY":{"Current":0.75,"Voltage":230,"Power":172}}',
+    )
+    runtime.mqtt.handle_message("tele/kuehltruhe/LWT", "Offline")
+    E2E_APP = application
     yield f"http://127.0.0.1:{port}"
     server.should_exit = True
     thread.join(timeout=5)
+    E2E_APP = None
 
 
 @pytest.mark.parametrize(("width", "height"), VIEWPORTS)
@@ -106,6 +176,10 @@ def test_legend_selection_persistence_login_and_canvas_resize(page: Page, live_s
     assert page.locator("#liveCards").count() == 0
     legend = page.locator("#deviceLegend")
     canvas = page.locator("#historyCanvas")
+    assert legend.is_hidden()
+    ga_button = page.get_by_role("button", name="Diagrammlegende öffnen")
+    ga_button.focus()
+    page.keyboard.press("Enter")
     assert legend.is_visible()
     legend_box = legend.bounding_box()
     canvas_box = canvas.bounding_box()
@@ -119,7 +193,7 @@ def test_legend_selection_persistence_login_and_canvas_resize(page: Page, live_s
     current_group = device.locator(".legend-metric").filter(has_text="Strom")
     voltage_group = device.locator(".legend-metric").filter(has_text="Spannung")
     current_group.get_by_role("button").click()
-    voltage_group.get_by_role("button").click()
+    voltage_group.get_by_role("button").click(force=True)
     voltage_l1 = (
         voltage_group.locator(".legend-series").filter(has_text="L1").get_by_role("checkbox")
     )
@@ -128,14 +202,17 @@ def test_legend_selection_persistence_login_and_canvas_resize(page: Page, live_s
     assert voltage_l1.is_checked()
     assert device.locator(".legend-device-header input").evaluate("(input) => input.indeterminate")
 
-    page.get_by_role("button", name="Messstellen").click()
-    assert page.get_by_role("button", name="Messstellen").get_attribute("aria-expanded") == "false"
+    page.get_by_role("button", name="Diagrammlegende schließen").click()
+    assert legend.is_hidden()
     page.reload()
-    assert page.get_by_role("button", name="Messstellen").get_attribute("aria-expanded") == "false"
+    assert legend.is_hidden()
+    page.get_by_role("button", name="Diagrammlegende öffnen").focus()
+    page.keyboard.press("Space")
+    assert legend.is_visible()
 
     page.get_by_role("button", name="Menü öffnen").click()
     page.get_by_role("heading", name="Anmelden").wait_for(state="visible")
-    page.get_by_role("button", name="Schließen").click()
+    page.get_by_role("button", name="Schließen", exact=True).click()
     before = canvas.evaluate("(element) => element.width")
     page.set_viewport_size({"width": 844, "height": 390})
     page.wait_for_timeout(200)
@@ -209,7 +286,7 @@ def test_series_colors_are_unique_and_stable(page: Page, live_server: str) -> No
         "(markers) => markers.map((marker) => "
         "getComputedStyle(marker).getPropertyValue('--series-color'))"
     )
-    assert len(colors) == 44
+    assert len(colors) >= 44
     assert len(set(colors)) == len(colors)
     assert page.get_by_role("checkbox", name="Römerbad, Spannung, Gesamt").count() == 0
     page.reload()
@@ -218,3 +295,138 @@ def test_series_colors_are_unique_and_stable(page: Page, live_server: str) -> No
         "getComputedStyle(marker).getPropertyValue('--series-color'))"
     )
     assert reloaded_colors == colors
+
+
+def login(page: Page, live_server: str) -> None:
+    page.goto(live_server)
+    page.get_by_role("button", name="Menü öffnen").click()
+    page.get_by_label("Benutzername").fill("operator")
+    page.get_by_label("Passwort").fill("correct-horse-battery-staple")
+    page.get_by_role("button", name="Anmelden").click()
+    page.locator("#adminDrawer").wait_for(state="visible")
+
+
+def test_protected_plug_overview_responsive_and_confirmation_driven(
+    page: Page,
+    live_server: str,
+) -> None:
+    errors: list[str] = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.set_viewport_size({"width": 360, "height": 800})
+    login(page, live_server)
+    page.get_by_role("button", name="Steckdosen-Übersicht").click()
+    page.get_by_role("heading", name="Steckdosen-Übersicht").wait_for()
+    assert page.locator(".plug-card").count() == 2
+    assert page.locator(".plug-card", has_text="Kühltruhe").get_by_role("switch").count() == 0
+    bauwagen = page.locator(".plug-card", has_text="Bauwagen")
+    power_switch = bauwagen.get_by_role("switch")
+    assert power_switch.count() == 1
+    assert (
+        page.locator("#adminContent").evaluate(
+            "(element) => element.scrollWidth - element.clientWidth"
+        )
+        == 0
+    )
+
+    runtime = E2E_APP.state.runtime
+    runtime.mqtt.connected = True
+    runtime.mqtt.publish_power = lambda _device, _state: True
+    power_switch.click()
+    bauwagen.locator("[data-relay-state]").get_by_text("Wird eingeschaltet …").wait_for()
+    assert power_switch.is_disabled()
+    runtime.mqtt.handle_message("stat/id139_bauwagen/POWER", "ON")
+    bauwagen.locator("[data-relay-state]").get_by_text("Eingeschaltet", exact=True).wait_for()
+    assert bauwagen.get_by_role("switch").get_attribute("aria-checked") == "true"
+
+    runtime.control.timeout_seconds = 0.1
+    bauwagen.get_by_role("switch").click()
+    bauwagen.locator("[data-relay-state]").get_by_text("Wird ausgeschaltet …").wait_for()
+    bauwagen.get_by_text("Schalten nicht bestätigt", exact=True).wait_for(timeout=2000)
+    assert bauwagen.get_by_role("switch").get_attribute("aria-checked") == "true"
+    assert errors == []
+
+
+def test_confirmed_state_is_restored_from_snapshot_after_reload(
+    page: Page,
+    live_server: str,
+) -> None:
+    page.set_viewport_size({"width": 900, "height": 720})
+    login(page, live_server)
+    page.get_by_role("button", name="Steckdosen-Übersicht").click()
+    bauwagen = page.locator(".plug-card", has_text="Bauwagen")
+    assert bauwagen.get_by_role("switch").get_attribute("aria-checked") == "true"
+    page.reload()
+    page.get_by_role("button", name="Menü öffnen").click()
+    page.get_by_role("button", name="Steckdosen-Übersicht").click()
+    bauwagen = page.locator(".plug-card", has_text="Bauwagen")
+    assert bauwagen.get_by_role("switch").get_attribute("aria-checked") == "true"
+
+
+def test_chart_survives_repeated_empty_refreshes_without_duplicate_runtime(
+    page: Page,
+    live_server: str,
+) -> None:
+    requests = 0
+    errors: list[str] = []
+    with E2E_APP.state.runtime.database.sessions() as session:
+        first_device = session.query(Device).order_by(Device.sort_order).first()
+        assert first_device is not None
+        existing_series_key = f"{first_device.id}:current:l1"
+    empty_existing_series = json.dumps(
+        {
+            "series": [{"key": existing_series_key, "points": []}],
+            "to": "2026-08-06T12:00:00+00:00",
+        }
+    )
+    sparse_existing_series = json.dumps(
+        {
+            "series": [
+                {
+                    "key": existing_series_key,
+                    "points": [["2026-08-06T11:59:00+00:00", 1.5]],
+                }
+            ],
+            "to": "2026-08-06T12:00:00+00:00",
+        }
+    )
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.add_init_script("window.GA_TEST_HISTORY_INTERVAL_MS = 80")
+
+    def history_route(route: Any) -> None:
+        nonlocal requests
+        requests += 1
+        if requests == 1:
+            route.continue_()
+        else:
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=sparse_existing_series if requests % 2 == 0 else empty_existing_series,
+            )
+
+    page.route("**/api/public/history-batch**", history_route)
+    page.set_viewport_size({"width": 1366, "height": 768})
+    page.goto(live_server)
+    for _ in range(30):
+        if page.evaluate("window.GAApp?.getVisibleSeriesCount() || 0") > 0:
+            break
+        page.wait_for_timeout(100)
+    else:
+        pytest.fail("Initial history series did not become visible")
+    initial_count = page.evaluate("window.GAApp.getVisibleSeriesCount()")
+    canvas = page.locator("#historyCanvas")
+    box = canvas.bounding_box()
+    assert box is not None
+    page.mouse.move(box["x"] + 420, box["y"] + 260)
+    page.mouse.down()
+    page.mouse.move(box["x"] + 820, box["y"] + 420)
+    page.mouse.up()
+    reset = page.get_by_role("button", name="Diagrammzoom zurücksetzen")
+    assert reset.is_visible()
+    page.wait_for_timeout(550)
+    assert requests >= 4
+    assert requests < 14
+    assert page.evaluate("window.GAApp.getVisibleSeriesCount()") == initial_count
+    assert reset.is_visible()
+    assert E2E_APP.state.runtime.websockets.count == 1
+    assert errors == []

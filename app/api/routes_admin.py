@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import colorsys
 import json
-import secrets
 
 from fastapi import APIRouter, HTTPException, Request
 from sqlalchemy import func, select
@@ -74,11 +73,9 @@ def create_device(payload: DeviceInput, request: Request) -> dict[str, object]:
     user, _ = _authorize(request, csrf=True)
     runtime = request.app.state.runtime
     color = payload.color or _generated_color(payload.technical_device_id)
-    password = payload.mqtt_password or secrets.token_urlsafe(18)
     device = Device(
-        **payload.model_dump(exclude={"mqtt_password", "color"}),
+        **payload.model_dump(exclude={"color"}),
         color=color,
-        mqtt_password_hash=hash_password(password),
     )
     try:
         with runtime.database.sessions.begin() as session:
@@ -88,9 +85,7 @@ def create_device(payload: DeviceInput, request: Request) -> dict[str, object]:
             status_code=409, detail="Geräte-ID, Topic oder Client-ID existiert bereits."
         ) from error
     _audit(request, user.id, "device.create", "device", device.id, device.name)
-    result = admin_device(device, runtime.settings, runtime.live_store)
-    result["generated_mqtt_password"] = password if payload.mqtt_password is None else None
-    return result
+    return admin_device(device, runtime.settings, runtime.live_store)
 
 
 @router.patch("/devices/{device_id}")
@@ -98,16 +93,27 @@ def update_device(device_id: str, payload: DeviceUpdate, request: Request) -> di
     user, _ = _authorize(request, csrf=True)
     runtime = request.app.state.runtime
     updates = payload.model_dump(exclude_unset=True)
-    password = updates.pop("mqtt_password", None)
     try:
         with runtime.database.sessions.begin() as session:
             device = session.get(Device, device_id)
             if device is None:
                 raise HTTPException(status_code=404, detail="Gerät nicht gefunden.")
-            for key, value in updates.items():
+            current = {
+                "name": device.name,
+                "technical_device_id": device.technical_device_id,
+                "mqtt_topic_prefix": device.mqtt_topic_prefix,
+                "mqtt_client_id": device.mqtt_client_id,
+                "mqtt_username": device.mqtt_username,
+                "device_type": device.device_type,
+                "controllable": device.controllable,
+                "relay_index": device.relay_index,
+                "enabled": device.enabled,
+                "sort_order": device.sort_order,
+                "color": device.color,
+            }
+            validated = DeviceInput.model_validate(current | updates)
+            for key, value in validated.model_dump().items():
                 setattr(device, key, value)
-            if password:
-                device.mqtt_password_hash = hash_password(password)
             device.updated_at = utc_now()
     except IntegrityError as error:
         raise HTTPException(

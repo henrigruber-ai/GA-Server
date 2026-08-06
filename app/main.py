@@ -22,6 +22,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from app import __version__
 from app.api.routes_admin import router as admin_router
 from app.api.routes_auth import router as auth_router
+from app.api.routes_control import router as control_router
 from app.api.routes_health import router as health_router
 from app.api.routes_public import router as public_router
 from app.config import Settings
@@ -64,6 +65,7 @@ def create_app(app_settings: Settings | None = None) -> FastAPI:
     application.include_router(public_router)
     application.include_router(auth_router)
     application.include_router(admin_router)
+    application.include_router(control_router)
     application.include_router(health_router)
 
     templates = Environment(

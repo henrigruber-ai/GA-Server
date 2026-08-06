@@ -1,6 +1,6 @@
 # File: Dockerfile
-# Version: 0.2.0
-# Date: 2026-08-04
+# Version: 0.3.0
+# Date: 2026-08-06
 # Purpose: Builds the non-root GA-Server production container.
 
 FROM python:3.12-slim AS builder

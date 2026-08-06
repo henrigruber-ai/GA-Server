@@ -23,6 +23,8 @@ from app.db.database import Database
 from app.db.seed import seed_example_devices
 from app.services.aggregation import MinuteAggregator
 from app.services.cleanup import CleanupService
+from app.services.control_state import ControlStateStore
+from app.services.device_control import DeviceControlService
 from app.services.live_store import LiveStore
 from app.services.measurement_store import MeasurementStore
 from app.services.mqtt_service import MqttService
@@ -40,6 +42,9 @@ class Runtime:
     measurement_store: MeasurementStore
     aggregator: MinuteAggregator
     websockets: WebSocketManager
+    control_websockets: WebSocketManager
+    control_store: ControlStateStore
+    control: DeviceControlService
     auth: AuthService
     cleanup: CleanupService
     mqtt: MqttService
@@ -56,6 +61,18 @@ class Runtime:
         measurement_store = MeasurementStore(database)
         aggregator = MinuteAggregator(measurement_store.save)
         websockets = WebSocketManager()
+        control_websockets = WebSocketManager()
+        control_store = ControlStateStore()
+        control = DeviceControlService(database, control_store, control_websockets)
+        mqtt = MqttService(
+            database,
+            settings,
+            live_store,
+            aggregator,
+            websockets,
+            control,
+        )
+        control.bind_mqtt(mqtt)
         return cls(
             settings=settings,
             project_root=project_root,
@@ -64,9 +81,12 @@ class Runtime:
             measurement_store=measurement_store,
             aggregator=aggregator,
             websockets=websockets,
+            control_websockets=control_websockets,
+            control_store=control_store,
+            control=control,
             auth=AuthService(database, settings),
             cleanup=CleanupService(database, settings),
-            mqtt=MqttService(database, settings, live_store, aggregator, websockets),
+            mqtt=mqtt,
             started_at=utc_now(),
         )
 
@@ -75,7 +95,9 @@ class Runtime:
         if self.settings.seed_example_devices:
             with self.database.sessions() as session:
                 seed_example_devices(session)
-        self.mqtt.start(asyncio.get_running_loop())
+        event_loop = asyncio.get_running_loop()
+        self.control.set_event_loop(event_loop)
+        self.mqtt.start(event_loop)
         self.maintenance_task = asyncio.create_task(self._maintenance_loop())
 
     async def stop(self) -> None:
@@ -84,7 +106,9 @@ class Runtime:
             with suppress(asyncio.CancelledError):
                 await self.maintenance_task
         self.mqtt.stop()
+        self.control.stop()
         await self.websockets.close_all()
+        await self.control_websockets.close_all()
         self.database.dispose()
 
     async def _maintenance_loop(self) -> None:

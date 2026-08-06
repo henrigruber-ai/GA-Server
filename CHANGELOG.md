@@ -1,11 +1,35 @@
 <!--
 File: CHANGELOG.md
-Version: 0.2.0
-Date: 2026-08-04
+Version: 0.3.0
+Date: 2026-08-06
 Purpose: Records user-visible changes by semantic version.
 -->
 
 # Versionshistorie
+
+## 0.3.0 – 2026-08-06
+
+- Tasmota-Steckdosen werden über strikt klassifizierte MQTT-Topics erfasst;
+  SENSOR und STATUS10 fließen in denselben LiveStore und Minutenaggregator wie
+  Shelly Pro 3EM.
+- Eine geschützte, responsive „Steckdosen-Übersicht“ zeigt Roh-Livewerte,
+  Onlinezustand, bestätigten Relaiszustand und nur bei ausdrücklich steuerbaren
+  Geräten einen Schalter.
+- Schaltbefehle werden serverseitig ausschließlich als `ON` oder `OFF` mit
+  QoS 1 und ohne Retain veröffentlicht. Die Oberfläche übernimmt einen
+  Endzustand erst nach passender Tasmota-POWER-Bestätigung.
+- Thread-sicherer ControlStateStore, fünf Sekunden Timeout, Konflikterkennung,
+  Reconnect-Abfrage, getrennte geschützte Control-WebSockets und Auditereignisse
+  ergänzt.
+- Geräte um `device_type`, `controllable` und `relay_index` erweitert; additive,
+  idempotente Alembic-Migration für bestehende SQLite-Datenbanken ergänzt.
+- „GA“ ist jetzt der einzige barrierefreie Legenden-Schalter; die Legende ist
+  nach jedem Seitenaufruf zunächst geschlossen.
+- Historienaktualisierungen behalten die letzte gültige Darstellung bei, wenn
+  eine Folgeantwort leer oder fehlerhaft ist. Auswahl und Zoom bleiben erhalten.
+- Regressionstests für wiederholte Aktualisierungen, Parser, Steuerablauf,
+  API-Sicherheit, Migration, responsive Darstellung und bestehende Shelly-Flows
+  ergänzt.
 
 ## 0.2.0 – 2026-08-04
 

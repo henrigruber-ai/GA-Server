@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # File: deploy/gcp/bootstrap.sh
-# Version: 0.2.0
+# Version: 0.3.0
 # Date: 2026-08-04
 # Purpose: Idempotently prepares a GCP host and starts the published production stack.
 
@@ -15,8 +15,8 @@ GA_PROJECT_ID="${GA_PROJECT_ID:-}"
 GA_DATA_DEVICE_NAME="${GA_DATA_DEVICE_NAME:-ga-server-data}"
 GA_ALLOW_DATA_DISK_FORMAT="${GA_ALLOW_DATA_DISK_FORMAT:-false}"
 GA_DEPLOYMENT_SOURCE_BASE_URL="${GA_DEPLOYMENT_SOURCE_BASE_URL:-https://raw.githubusercontent.com/henrigruber-ai/GA-Server}"
-GA_DEPLOYMENT_SOURCE_REF="${GA_DEPLOYMENT_SOURCE_REF:-v0.2.0}"
-GA_SERVER_IMAGE_TAG="${GA_SERVER_IMAGE_TAG:-0.2.0}"
+GA_DEPLOYMENT_SOURCE_REF="${GA_DEPLOYMENT_SOURCE_REF:-v0.3.0}"
+GA_SERVER_IMAGE_TAG="${GA_SERVER_IMAGE_TAG:-0.3.0}"
 GA_MQTT_SECRET_NAME="${GA_MQTT_SECRET_NAME:-}"
 GA_PUBLIC_BASE_URL="${GA_PUBLIC_BASE_URL:-}"
 GA_MQTT_PUBLIC_HOST="${GA_MQTT_PUBLIC_HOST:-}"
