@@ -64,6 +64,7 @@ class Session(Base):
 
 class Device(Base):
     __tablename__ = "devices"
+    __table_args__ = (Index("ix_devices_type_enabled", "device_type", "enabled"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_string)
     name: Mapped[str] = mapped_column(String(120))
@@ -72,6 +73,9 @@ class Device(Base):
     mqtt_client_id: Mapped[str] = mapped_column(String(120), unique=True)
     mqtt_username: Mapped[str | None] = mapped_column(String(120), nullable=True)
     mqtt_password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    device_type: Mapped[str] = mapped_column(String(32), default="shelly_pro_3em")
+    controllable: Mapped[bool] = mapped_column(Boolean, default=False)
+    relay_index: Mapped[int] = mapped_column(Integer, default=1)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, index=True)
     color: Mapped[str] = mapped_column(String(7), default="#36c5f0")

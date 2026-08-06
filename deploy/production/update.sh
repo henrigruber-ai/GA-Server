@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 # File: deploy/production/update.sh
-# Version: 0.2.0
+# Version: 0.3.0
 # Date: 2026-08-04
 # Purpose: Pulls and restarts the production stack without touching persistent data.
 

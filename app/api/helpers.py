@@ -1,11 +1,12 @@
 """
 File: app/api/helpers.py
-Version: 0.2.0
-Date: 2026-08-04
+Version: 0.3.0
+Date: 2026-08-06
 Purpose: Serializes database objects without exposing secret fields.
 Changes:
 - 0.1.0: Initial implementation.
 - 0.2.0: Exposes series capabilities and freshness thresholds to the monitor.
+- 0.3.0: Exposes device-type-specific series and control metadata.
 """
 
 from __future__ import annotations
@@ -36,6 +37,15 @@ def connection_state(last_seen_at: datetime | None, settings: Settings) -> str:
 
 def public_device(device: Device, settings: Settings, live_store: LiveStore) -> dict[str, object]:
     latest = live_store.latest().get(device.id)
+    definitions = (
+        {
+            "current": ("l1", "total"),
+            "voltage": ("l1",),
+            "power": ("l1", "total"),
+        }
+        if device.device_type == "tasmota_plug"
+        else SERIES_DEFINITIONS
+    )
     return {
         "id": device.id,
         "name": device.name,
@@ -46,7 +56,7 @@ def public_device(device: Device, settings: Settings, live_store: LiveStore) -> 
         "last_seen_at": iso(device.last_seen_at),
         "has_data": latest is not None or device.last_seen_at is not None,
         "available_series": [
-            f"{metric}:{phase}" for metric, phases in SERIES_DEFINITIONS.items() for phase in phases
+            f"{metric}:{phase}" for metric, phases in definitions.items() for phase in phases
         ],
         "stale_seconds": settings.stale_seconds,
         "offline_seconds": settings.offline_seconds,
@@ -62,6 +72,9 @@ def admin_device(device: Device, settings: Settings, live_store: LiveStore) -> d
             "mqtt_client_id": device.mqtt_client_id,
             "mqtt_username": device.mqtt_username,
             "mqtt_password_configured": device.mqtt_password_hash is not None,
+            "device_type": device.device_type,
+            "controllable": device.controllable,
+            "relay_index": device.relay_index,
             "enabled": device.enabled,
             "created_at": iso(device.created_at),
             "updated_at": iso(device.updated_at),

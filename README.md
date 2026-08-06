@@ -1,13 +1,14 @@
 <!--
 File: README.md
-Version: 0.2.0
-Date: 2026-08-04
-Purpose: Explains installation, operation, Shelly configuration, security, tests, and recovery.
+Version: 0.3.0
+Date: 2026-08-06
+Purpose: Explains installation, Shelly/Tasmota operation, security, tests, and recovery.
 -->
 
-# GA-Server 0.2.0
+# GA-Server 0.3.0
 
-GA-Server empfängt elektrische Messwerte mehrerer Shelly Pro 3EM, fasst sie zu
+GA-Server empfängt elektrische Messwerte von Shelly Pro 3EM und
+Tasmota-Steckdosen, fasst sie zu
 Minutenwerten zusammen und zeigt sie als öffentlichen, bildschirmfüllenden
 24-Stunden-Verlauf. Die Geräte- und Systemverwaltung ist durch Anmeldung
 geschützt.
@@ -19,11 +20,17 @@ Wichtig:
 - Ein Shelly darf **nicht** die HTTPS-Adresse als MQTT-Server verwenden.
 - Port 1883 bleibt im Docker-Netz und wird nicht öffentlich freigegeben.
 
-## Funktionsumfang 0.2.0
+## Funktionsumfang 0.3.0
+
+- geschützte „Steckdosen-Übersicht“ mit Rohwerten, Onlinezustand und
+  bestätigungsbasierter Tasmota-Schaltsteuerung
+- getrennte Shelly- und Tasmota-Parser bei gemeinsamer Live- und
+  Minutenwertverarbeitung
+- additive Alembic-Migration für bestehende Gerätebestände
 
 - Strom L1/L2/L3/Gesamt, Spannung L1/L2/L3 und Wirkleistung
   L1/L2/L3/Gesamt
-- ausklappbare, in den Graphen eingebettete Hierarchie für eine unabhängige
+- über den GA-Button einblendbare, in den Graphen eingebettete Hierarchie für eine unabhängige
   Auswahl beliebiger Messstellen, Messgrößen und Phasen
 - deterministische Farbe je Datenreihe sowie ergänzende Phasen-Linienmuster
 - Canvas-Graph mit getrennten, nur bei Bedarf sichtbaren Skalen für A, V und
@@ -33,7 +40,7 @@ Wichtig:
 - Vollbildansicht mit `100dvh`, Safe Areas und ohne permanente Kopfzeile
 - sekündlich dargestellte WebSocket-Roh-Livewerte in der Legende mit
   Alterskennzeichnung und begrenztem Reconnect-Backoff
-- gebündelte Diagrammaktualisierung im Abstand von zehn Sekunden
+- gebündelte, leere Antworten tolerierende Diagrammaktualisierung im Abstand von zehn Sekunden
 - begrenzter RAM-Puffer; keine dauerhafte Speicherung hochaufgelöster Rohwerte
 - genau eine aggregierte Zeile pro Gerät/UTC-Minute
 - Min/Max/Mittel je Messreihe sowie rollierende 1h-/24h-/7d-Statistik
@@ -51,7 +58,7 @@ Wichtig:
 ## Architektur
 
 ```text
-Shelly Pro 3EM -- MQTT/TLS :8883 --> Mosquitto
+Shelly Pro 3EM / Tasmota -- MQTT/TLS :8883 --> Mosquitto
                                          |
                                internes MQTT :1883
                                          |
@@ -148,16 +155,19 @@ Hostports in `.env` geändert werden, beispielsweise `GA_HTTP_PORT=18080` und
 Nach Anmeldung Burger-Menü → **Geräte** → Plus-Button:
 
 - Anzeigename, z. B. `Römerbad`
+- Geräteart `Shelly Pro 3EM` oder `Tasmota-Steckdose`
 - technische Geräte-ID, z. B. `roemerbad`
-- Topic-Präfix `ga/devices/roemerbad`
+- Shelly-Topic-Präfix `ga/devices/roemerbad` oder nacktes Tasmota-Topic
+  `id139_bauwagen`
 - eindeutige MQTT-Client-ID
 - MQTT-Benutzer
-- Passwort oder automatisch erzeugtes Passwort
+- optionale Steuerfreigabe und Relais 1 für Tasmota
 - Sortierung, Farbe, aktiv/deaktiviert
 
-Ein automatisch erzeugtes Passwort wird nur einmal angezeigt. In 0.2.0 muss
-dieser Benutzer zusätzlich mit `mosquitto_passwd` in Mosquitto angelegt werden.
-Eine Umbenennung ändert die interne UUID und die historischen Daten nicht.
+MQTT-Zugangsdaten werden bewusst nicht über HTML, JavaScript oder API-Antworten
+übertragen. Broker-Benutzer werden außerhalb der Weboberfläche mit
+`mosquitto_passwd` verwaltet. Eine Umbenennung ändert die interne UUID und die
+historischen Daten nicht.
 
 Beim Entfernen gibt es zwei Varianten:
 
@@ -208,13 +218,39 @@ Unterstützt werden `a_current`, `b_current`, `c_current`, `total_current`,
 zusätzliche Werte führen nicht zum Prozessabbruch. Gesamtstrom und
 Gesamtleistung werden nur bei drei vollständigen Phasen ersatzweise addiert.
 
+## Tasmota-Steckdose konfigurieren
+
+Im Geräteformular wird nur das nackte Tasmota-Topic gespeichert, beispielsweise
+`id139_bauwagen`. Präfixe wie `tele/`, `stat/` oder `cmnd/` sind nicht zulässig.
+GA-Server abonniert:
+
+```text
+tele/+/SENSOR
+tele/+/LWT
+stat/+/STATUS10
+stat/+/POWER
+stat/+/RESULT
+```
+
+Schaltbefehle werden ausschließlich serverseitig an
+`cmnd/<topic>/POWER` mit `ON` oder `OFF`, QoS 1 und `retain=false`
+veröffentlicht. `TOGGLE` und frei übergebene Topics werden abgewiesen. Nach
+jedem Reconnect fragt GA-Server den aktuellen POWER-Zustand aller aktiven
+Tasmota-Steckdosen mit leerer Payload ab.
+
+Die Oberfläche zeigt „Eingeschaltet“ oder „Ausgeschaltet“ erst nach einer
+passenden Meldung auf `stat/<topic>/POWER`. Bis dahin bleibt der Schalter
+deaktiviert im Pending-Zustand; nach fünf Sekunden folgt ein Timeout auf den
+letzten bestätigten Zustand. Ausführliche Einrichtung und Fehlersuche:
+[`docs/tasmota.md`](docs/tasmota.md).
+
 ## Speicherung und Begrenzung
 
 SQLite liegt standardmäßig unter `/data/ga-server.db`. Die Tabellen sind:
 
 - `users`
 - `sessions`
-- `devices`
+- `devices` einschließlich Geräteart, Steuerfreigabe und Relaisindex
 - `minute_measurements`
 - `device_window_stats`
 - `settings`
@@ -273,6 +309,19 @@ GET /api/public/window-stats?metric=power&phase=total
 WS  /api/public/live-stream
 ```
 
+Geschützt und nur mit gültiger Sitzung; POST zusätzlich mit CSRF:
+
+```text
+GET  /api/admin/control/devices
+POST /api/admin/control/devices/{device_id}/power
+WS   /api/admin/control-stream
+```
+
+Der POST-Body enthält ausschließlich `{"state":"on"}` oder
+`{"state":"off"}` und bestätigt mit HTTP 202 nur die Annahme. Bestätigung,
+Konflikt oder Timeout folgen über den getrennten Control-WebSocket. Der
+öffentliche WebSocket enthält keine Control-Ereignisse.
+
 Die Historie ist auf acht Tage, 2.880 ausgegebene Punkte je Gerät und begrenzte
 SQL-Ergebnisse beschränkt. Öffentliche Antworten enthalten keine Sessions,
 Hashes, MQTT-Passwörter, privaten Settings oder Auditdaten.
@@ -286,8 +335,9 @@ Minutenwerten statt. Die in der Serverkonfiguration definierten Schwellen
 `GA_STALE_SECONDS` und `GA_OFFLINE_SECONDS` steuern die Kennzeichnung als
 „veraltet“ beziehungsweise „nicht aktuell“.
 
-Auswahl, aufgeklappte Gruppen und Legendenzustand werden als validierter,
-versionierter Zustand im lokalen Browser gespeichert. Nicht mehr vorhandene
+Auswahl und aufgeklappte Gruppen werden als validierter, versionierter Zustand
+im lokalen Browser gespeichert. Die Legende selbst ist nach jedem Seitenaufruf
+geschlossen und wird ausschließlich über den GA-Button bedient. Nicht mehr vorhandene
 Messstellen oder Reihen werden beim Laden ignoriert. Der Zoom bleibt bei
 automatischen Diagrammaktualisierungen bestehen. Auf Touchgeräten wird mit zwei
 Fingern horizontal gezoomt und im vergrößerten Bereich verschoben; am Desktop
@@ -307,6 +357,11 @@ alembic upgrade head
 docker build -t ga-server:local .
 .\scripts\check-secrets.ps1
 ```
+
+Die vollständige Testmatrix und die Regression für mehrere verkürzte
+10-Sekunden-Zyklen stehen in [`docs/testing.md`](docs/testing.md). Das
+Migrations- und Rollbackverfahren steht in
+[`docs/migration-0.3.0.md`](docs/migration-0.3.0.md).
 
 Die Browser-Tests decken 320×568, 390×844, 844×390, 768×1024, 1366×768,
 1920×1080 und 2560×1440 ab.
@@ -360,10 +415,11 @@ Rollback:
 Setze in Produktion mindestens `GA_ENV=production` und
 `GA_COOKIE_SECURE=true`.
 
-## Bekannte Einschränkungen 0.2.0
+## Bekannte Einschränkungen 0.3.0
 
-- Mosquitto-Passwörter werden aus Sicherheitsgründen nicht durch eine öffentliche
-  API geschrieben. Der Betreiber synchronisiert sie mit `mosquitto_passwd`.
+- Mosquitto-Passwörter werden aus Sicherheitsgründen weder durch die Web-API
+  geschrieben noch in der Oberfläche verarbeitet. Der Betreiber verwaltet sie
+  mit `mosquitto_passwd`.
 - Die Benutzerseite zeigt vorhandene Benutzer; Anlegen/Zurücksetzen ist in der
   API und CLI verfügbar, in der Oberfläche folgt die komfortable Formularführung
   nach dem MVP.

@@ -1,11 +1,12 @@
 /*
 File: app/web/static/js/history-chart.js
-Version: 0.2.0
-Date: 2026-08-04
+Version: 0.3.0
+Date: 2026-08-06
 Purpose: Draws a responsive multi-unit canvas chart with grouped tooltips and mouse/touch zoom.
 Changes:
 - 0.1.0: Initial implementation.
 - 0.2.0: Adds independent series, three labeled scales, gap handling, and persistent zoom.
+- 0.3.0: Preserves complete timestamp/value points while merging incremental history.
 */
 
 (() => {
@@ -80,7 +81,9 @@ Changes:
           return;
         }
         const points = new Map(
-          existing.points.filter(([timestamp]) => timestamp >= cutoff),
+          existing.points
+            .filter(([timestamp]) => timestamp >= cutoff)
+            .map((point) => [point[0], point]),
         );
         normalized.points.forEach((point) => points.set(point[0], point));
         byKey.set(normalized.key, {

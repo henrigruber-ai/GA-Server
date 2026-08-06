@@ -101,6 +101,9 @@ class AuthService:
         raw_token = request.cookies.get(COOKIE_NAME)
         if not raw_token:
             raise HTTPException(status_code=401, detail="Anmeldung erforderlich.")
+        return self.authenticate_token(raw_token)
+
+    def authenticate_token(self, raw_token: str) -> tuple[User, UserSession]:
         with self.database.sessions.begin() as session:
             user_session = session.scalar(
                 select(UserSession).where(UserSession.token_hash == token_hash(raw_token))

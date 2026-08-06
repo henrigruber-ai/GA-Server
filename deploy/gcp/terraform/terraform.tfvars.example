@@ -1,5 +1,5 @@
 # File: deploy/gcp/terraform/terraform.tfvars.example
-# Version: 0.2.0
+# Version: 0.3.0
 # Date: 2026-08-04
 # Purpose: Safely references the partially existing production environment without creating duplicates.
 
@@ -42,8 +42,8 @@ existing_mqtt_secret_name = "<MQTT_SECRET_NAME>"
 create_instance        = false
 existing_instance_name = "<VM_NAME>"
 
-deployment_source_ref = "v0.2.0"
-image_tag              = "0.2.0"
+deployment_source_ref = "v0.3.0"
+image_tag              = "0.3.0"
 public_base_url        = "https://<PUBLIC_HOSTNAME>"
 mqtt_public_host       = "<MQTT_HOSTNAME>"
 acme_email             = "<ACME_EMAIL>"

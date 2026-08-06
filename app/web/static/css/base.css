@@ -1,11 +1,12 @@
 /*
 File: app/web/static/css/base.css
-Version: 0.2.0
-Date: 2026-08-04
-Purpose: Styles the responsive full-screen monitor and protected administration overlays.
+Version: 0.3.0
+Date: 2026-08-06
+Purpose: Styles the responsive monitor, legend, administration, and plug controls.
 Changes:
 - 0.1.0: Initial implementation.
 - 0.2.0: Styles the embedded hierarchical legend, multi-series markers, and zoom controls.
+- 0.3.0: Adds the GA legend button and responsive plug cards with accessible switches.
 */
 
 :root {
@@ -88,7 +89,13 @@ input:focus-visible {
   font-size: 13px;
   font-weight: 650;
   letter-spacing: 0.03em;
-  pointer-events: none;
+  min-height: 44px;
+  padding: 4px 8px 4px 4px;
+  border: 0;
+  border-radius: 12px;
+  background: rgba(7, 16, 24, 0.42);
+  cursor: pointer;
+  backdrop-filter: blur(8px);
 }
 
 .brand-mark {
@@ -202,11 +209,18 @@ input:focus-visible {
 
 .legend-device-header {
   display: grid;
-  grid-template-columns: 32px 26px minmax(0, 1fr) 16px;
+  grid-template-columns: 32px 26px minmax(0, 1fr) auto 16px;
   min-height: 44px;
   align-items: center;
   gap: 5px;
   padding: 2px 7px 2px 2px;
+}
+
+.legend-device-live {
+  color: var(--text);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .legend-device-header:hover,
@@ -786,8 +800,13 @@ input:focus-visible {
   .admin-nav {
     flex-direction: row;
     overflow-x: auto;
+    scrollbar-width: none;
     border-right: 0;
     border-bottom: 1px solid var(--line);
+  }
+
+  .admin-nav::-webkit-scrollbar {
+    display: none;
   }
 
   .admin-nav button {
@@ -835,6 +854,206 @@ input:focus-visible {
     min-height: 40px;
     padding: 0 10px;
     font-size: 11px;
+  }
+}
+
+.modal-card select {
+  width: 100%;
+  min-height: 46px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #09151f;
+  color: var(--text);
+}
+
+.modal-card small {
+  color: var(--muted);
+  font-weight: 400;
+  line-height: 1.4;
+}
+
+.plug-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  align-items: stretch;
+  gap: 14px;
+  width: 100%;
+}
+
+.plug-card {
+  display: grid;
+  min-width: 0;
+  min-height: 330px;
+  grid-template-rows: auto 1fr auto auto;
+  gap: 18px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 17px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.plug-header {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.plug-header h4 {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+  font-size: 21px;
+}
+
+.plug-online {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.plug-online.online {
+  color: #6cebc9;
+}
+
+.plug-online.offline {
+  color: #ffb3bb;
+}
+
+.plug-values {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.plug-values div {
+  display: flex;
+  min-width: 0;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(171, 207, 226, 0.09);
+}
+
+.plug-values dt {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+
+.plug-values dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.plug-control {
+  min-height: 54px;
+}
+
+.power-switch {
+  display: flex;
+  width: 100%;
+  min-height: 56px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.055);
+  cursor: pointer;
+}
+
+.power-switch:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.switch-track {
+  position: relative;
+  flex: 0 0 54px;
+  width: 54px;
+  height: 30px;
+  border-radius: 18px;
+  background: #43515a;
+}
+
+.switch-thumb {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: white;
+  transition: transform 0.16s ease;
+}
+
+.power-switch[aria-checked="true"] .switch-track {
+  background: var(--accent);
+}
+
+.power-switch[aria-checked="true"] .switch-thumb {
+  transform: translateX(24px);
+}
+
+.switch-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 750;
+  text-align: right;
+}
+
+.plug-readonly {
+  display: grid;
+  min-height: 54px;
+  place-items: center;
+  border: 1px dashed var(--line);
+  border-radius: 13px;
+  color: var(--muted);
+}
+
+.plug-error {
+  min-height: 20px;
+  margin: 0;
+  color: #ff9aa4;
+  font-size: 13px;
+}
+
+.plug-empty {
+  display: grid;
+  max-width: 520px;
+  justify-items: start;
+  gap: 16px;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+@media (min-width: 600px) {
+  .plug-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1000px) {
+  .plug-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1450px) {
+  .drawer-shell {
+    width: min(1500px, 100%);
+  }
+
+  .plug-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 

@@ -1,11 +1,11 @@
 <!--
 File: docs/architecture.md
-Version: 0.2.0
-Date: 2026-08-04
+Version: 0.3.0
+Date: 2026-08-06
 Purpose: Captures the application architecture, data paths, and explicit trade-offs.
 -->
 
-# Architekturentscheidung GA-Server 0.2.0
+# Architekturentscheidung GA-Server 0.3.0
 
 ## Entscheidung
 
@@ -17,9 +17,10 @@ verwendet WAL.
 ## Datenfluss
 
 1. Mosquitto nimmt TLS-Verbindungen auf `mqtt.strom.gruber-automation.de:8883` an.
-2. GA-Server abonniert intern `ga/devices/+/status/em:0` und
-   `ga/devices/+/online`.
-3. Der Parser validiert Topic und Payload defensiv. Eine technische Geräte-ID
+2. GA-Server hält die bisherigen Shelly-Abonnements aktiv und abonniert getrennt
+   die unterstützten Tasmota-Topics unter `tele/+/...` und `stat/+/...`.
+3. Ein Shelly- und ein eigener Tasmota-Parser validieren Topic und Payload
+   defensiv. Eine technische Geräte-ID
    wird genau einem konfigurierten Gerät zugeordnet.
 4. Ein begrenzter RAM-Puffer versorgt die Live-API und WebSockets. Der jeweils
    letzte unveränderte Rohdatensatz je Gerät bildet die Datenquelle für die
@@ -31,6 +32,12 @@ verwendet WAL.
 7. Die gebündelte Historien-API liest mehrere Messgrößen und Phasen in einer
    Anfrage aus den Minutenaggregaten. Der Browser aktualisiert diese Daten etwa
    alle zehn Sekunden unabhängig vom Rohwert-WebSocket.
+8. Der thread-sichere ControlStateStore hält bestätigten POWER-Zustand,
+   Onlinezustand, Pending-Befehl, Deadline und letzten Fehler ausschließlich im
+   RAM. DeviceControlService erzeugt serverseitig das MQTT-Topic und akzeptiert
+   nur ON/OFF.
+9. Control-Ereignisse laufen über einen eigenen sessiongeschützten WebSocket.
+   Der öffentliche Live-WebSocket transportiert weiterhin nur Messwerte.
 
 ## Visualisierung
 
@@ -43,8 +50,10 @@ in Kurve, Legende und Tooltip gemeinsam verwendet.
 
 Die Auswahl und der Aufbauzustand der eingebetteten Legende werden versioniert
 im Browser gespeichert und beim Laden gegen die vom Server gemeldeten
-Fähigkeiten validiert. Der Graph hält seinen Zeit-Zoom über Historienupdates
-hinweg. Fehlende Minutenpunkte werden nicht zu Nullen umgedeutet; zeitliche
+Fähigkeiten validiert. Die Legende selbst startet geschlossen und wird mit dem
+GA-Button bedient. Der Graph hält seinen Zeit-Zoom über Historienupdates hinweg.
+Leere oder fehlgeschlagene Folgeantworten ersetzen keine gültigen Reihen.
+Fehlende Minutenpunkte werden nicht zu Nullen umgedeutet; zeitliche
 Lücken von mehr als zweieinhalb Minuten unterbrechen die Linie.
 
 ## Begründung
@@ -59,7 +68,7 @@ gespeichert.
 
 - Eine einzelne GA-Server-Instanz ist der Writer der SQLite-Datei.
 - Der Live-Puffer ist absichtlich flüchtig.
-- MQTT-Benutzer werden in 0.2.0 über Mosquittos Passwortdatei verwaltet. Die
+- MQTT-Benutzer werden in 0.3.0 über Mosquittos Passwortdatei verwaltet. Die
   Geräteverwaltung speichert keine abrufbaren Klartext-Passwörter.
 - Caddy terminiert HTTPS; Mosquitto terminiert MQTT-TLS selbst.
 - Die Referenzimplementierung `fronius-regler` war aus dieser Umgebung nicht
