@@ -103,10 +103,10 @@ def test_device_mqtt_password_is_write_only_and_blank_update_keeps_hash(
     authenticated: tuple[TestClient, str],
 ) -> None:
     client, csrf = authenticated
-    initial_password = "mqtt-device-secret"
+    initial_credential = "mqtt-device-secret"
     created = client.post(
         "/api/admin/devices",
-        json=device_payload() | {"mqtt_password": initial_password},
+        json=device_payload() | {"mqtt_password": initial_credential},
         headers={"X-CSRF-Token": csrf},
     )
     assert created.status_code == 201
@@ -121,7 +121,7 @@ def test_device_mqtt_password_is_write_only_and_blank_update_keeps_hash(
         assert stored is not None
         original_hash = stored.mqtt_password_hash
     assert original_hash
-    assert original_hash != initial_password
+    assert original_hash != initial_credential
     assert original_hash.startswith("$argon2")
 
     unchanged = client.patch(
