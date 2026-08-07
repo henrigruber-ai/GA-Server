@@ -1,11 +1,18 @@
 <!--
 File: CHANGELOG.md
-Version: 0.3.0
-Date: 2026-08-06
+Version: 0.3.1
+Date: 2026-08-07
 Purpose: Records user-visible changes by semantic version.
 -->
 
 # Versionshistorie
+
+## 0.3.1 – 2026-08-07
+
+- MQTT-Passwörter können für Geräte wieder über die Administration gesetzt und geändert werden.
+- Gerätepasswörter werden ausschließlich als Argon2-Hash gespeichert und weder über die API noch in der Oberfläche zurückgegeben.
+- Beim Bearbeiten bleibt ein bereits gesetztes MQTT-Passwort erhalten, wenn das Passwortfeld leer gelassen wird; ein neu eingegebenes Passwort ersetzt den bisherigen Hash.
+- MQTT-Passwörter werden nicht in Audit-Details übernommen. Regressionstests sichern Anlegen, unverändertes Bearbeiten und Passwortwechsel ab.
 
 ## 0.3.0 – 2026-08-06
 
