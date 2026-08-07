@@ -1,12 +1,13 @@
 """
 File: tests/integration/test_api.py
-Version: 0.3.0
-Date: 2026-08-06
+Version: 0.3.1
+Date: 2026-08-07
 Purpose: Exercises public access, auth, CSRF, device lifecycle, history, and WebSockets.
 Changes:
 - 0.1.0: Initial implementation.
 - 0.1.1: Verifies readiness when MQTT is intentionally disabled.
 - 0.2.0: Verifies bundled multi-unit history and raw live-series metadata.
+- 0.3.1: Verifies write-only MQTT password storage and blank-edit preservation.
 """
 
 from datetime import UTC, datetime
@@ -33,8 +34,10 @@ def device_payload(name: str = "Werkstatt") -> dict[str, object]:
 
 
 def test_public_page_health_and_protected_access(client: TestClient) -> None:
-    assert client.get("/").status_code == 200
-    assert "historyCanvas" in client.get("/").text
+    page = client.get("/")
+    assert page.status_code == 200
+    assert "historyCanvas" in page.text
+    assert 'name="mqtt_password"' in page.text
     assert client.get("/health/live").json() == {"status": "alive"}
     ready = client.get("/health/ready")
     assert ready.status_code == 200
@@ -94,6 +97,58 @@ def test_device_create_rename_disable_and_identity_stability(
     )
     assert disabled.json()["enabled"] is False
     assert client.get("/api/public/devices").json() == []
+
+
+def test_device_mqtt_password_is_write_only_and_blank_update_keeps_hash(
+    authenticated: tuple[TestClient, str],
+) -> None:
+    client, csrf = authenticated
+    initial_password = "mqtt-device-secret"
+    created = client.post(
+        "/api/admin/devices",
+        json=device_payload() | {"mqtt_password": initial_password},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert created.status_code == 201
+    body = created.json()
+    assert body["mqtt_password_configured"] is True
+    assert "mqtt_password" not in body
+    assert "mqtt_password_hash" not in body
+
+    runtime = client.app.state.runtime
+    with runtime.database.sessions() as session:
+        stored = session.get(Device, body["id"])
+        assert stored is not None
+        original_hash = stored.mqtt_password_hash
+    assert original_hash
+    assert original_hash != initial_password
+    assert original_hash.startswith("$argon2")
+
+    unchanged = client.patch(
+        f"/api/admin/devices/{body['id']}",
+        json={"mqtt_password": ""},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert unchanged.status_code == 200
+    assert unchanged.json()["mqtt_password_configured"] is True
+    with runtime.database.sessions() as session:
+        stored = session.get(Device, body["id"])
+        assert stored is not None
+        assert stored.mqtt_password_hash == original_hash
+
+    replaced = client.patch(
+        f"/api/admin/devices/{body['id']}",
+        json={"mqtt_password": "replacement-secret"},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert replaced.status_code == 200
+    assert "mqtt_password" not in replaced.json()
+    with runtime.database.sessions() as session:
+        stored = session.get(Device, body["id"])
+        assert stored is not None
+        assert stored.mqtt_password_hash
+        assert stored.mqtt_password_hash != original_hash
+        assert stored.mqtt_password_hash != "replacement-secret"
 
 
 def test_simulated_mqtt_creates_live_and_one_minute_row(
