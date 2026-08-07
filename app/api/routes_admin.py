@@ -5,7 +5,7 @@ Date: 2026-08-07
 Purpose: Implements the authenticated and audited administration API.
 Changes:
 - 0.1.0: Initial implementation.
-- 0.3.1: Stores device MQTT passwords only as Argon2 hashes and keeps existing hashes on blank edits.
+- 0.3.1: Stores device MQTT passwords as Argon2 hashes and preserves them on blank edits.
 """
 
 from __future__ import annotations
