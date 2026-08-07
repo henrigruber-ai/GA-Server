@@ -1,10 +1,11 @@
 """
 File: app/api/routes_admin.py
-Version: 0.1.0
-Date: 2026-08-03
+Version: 0.3.1
+Date: 2026-08-07
 Purpose: Implements the authenticated and audited administration API.
 Changes:
 - 0.1.0: Initial implementation.
+- 0.3.1: Stores device MQTT passwords as Argon2 hashes and preserves them on blank edits.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ from sqlalchemy.exc import IntegrityError
 from app import __version__
 from app.api.helpers import admin_device, iso
 from app.api.schemas import DeleteDeviceInput, DeviceInput, DeviceUpdate, UserInput, UserUpdate
-from app.auth.security import hash_password
+from app.auth.security import hash_mqtt_password, hash_password
 from app.core.time import utc_now
 from app.db.models import AuditLog, Device, User
 from app.db.models import Session as UserSession
@@ -73,9 +74,13 @@ def create_device(payload: DeviceInput, request: Request) -> dict[str, object]:
     user, _ = _authorize(request, csrf=True)
     runtime = request.app.state.runtime
     color = payload.color or _generated_color(payload.technical_device_id)
+    values = payload.model_dump(exclude={"color", "mqtt_password"})
     device = Device(
-        **payload.model_dump(exclude={"color"}),
+        **values,
         color=color,
+        mqtt_password_hash=(
+            hash_mqtt_password(payload.mqtt_password) if payload.mqtt_password else None
+        ),
     )
     try:
         with runtime.database.sessions.begin() as session:
@@ -93,6 +98,7 @@ def update_device(device_id: str, payload: DeviceUpdate, request: Request) -> di
     user, _ = _authorize(request, csrf=True)
     runtime = request.app.state.runtime
     updates = payload.model_dump(exclude_unset=True)
+    mqtt_password = updates.pop("mqtt_password", None)
     try:
         with runtime.database.sessions.begin() as session:
             device = session.get(Device, device_id)
@@ -112,8 +118,10 @@ def update_device(device_id: str, payload: DeviceUpdate, request: Request) -> di
                 "color": device.color,
             }
             validated = DeviceInput.model_validate(current | updates)
-            for key, value in validated.model_dump().items():
+            for key, value in validated.model_dump(exclude={"mqtt_password"}).items():
                 setattr(device, key, value)
+            if mqtt_password:
+                device.mqtt_password_hash = hash_mqtt_password(mqtt_password)
             device.updated_at = utc_now()
     except IntegrityError as error:
         raise HTTPException(

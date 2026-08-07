@@ -1,12 +1,13 @@
 """
 File: tests/e2e/test_responsive.py
-Version: 0.3.0
-Date: 2026-08-06
+Version: 0.3.1
+Date: 2026-08-07
 Purpose: Verifies legend, zoom, repeated refresh, and protected plug control behavior.
 Changes:
 - 0.1.0: Initial implementation.
 - 0.2.0: Covers hierarchical selection, persistence, axis clearance, and mouse zoom.
 - 0.3.0: Adds GA-button, Tasmota control, mobile overflow, timeout, and refresh regression tests.
+- 0.3.1: Disambiguates the login password field from the device MQTT password field.
 """
 
 from __future__ import annotations
@@ -301,7 +302,7 @@ def login(page: Page, live_server: str) -> None:
     page.goto(live_server)
     page.get_by_role("button", name="Menü öffnen").click()
     page.get_by_label("Benutzername").fill("operator")
-    page.get_by_label("Passwort").fill("correct-horse-battery-staple")
+    page.get_by_label("Passwort", exact=True).fill("correct-horse-battery-staple")
     page.get_by_role("button", name="Anmelden").click()
     page.locator("#adminDrawer").wait_for(state="visible")
 
