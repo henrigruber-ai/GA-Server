@@ -1,8 +1,10 @@
 {#
 File: app/web/templates/index.html
-Version: 0.3.0
-Date: 2026-08-06
+Version: 0.3.1
+Date: 2026-08-07
 Purpose: Hosts the public monitor, GA legend control, and protected administration views.
+Changes:
+- 0.3.1: Restores write-only MQTT password entry for managed devices.
 #}
 <!doctype html>
 <html lang="de" data-version="{{ version }}">
@@ -117,6 +119,13 @@ Purpose: Hosts the public monitor, GA legend control, and protected administrati
         </label>
         <label>MQTT-Client-ID<input name="mqtt_client_id" required></label>
         <label>MQTT-Benutzer<input name="mqtt_username"></label>
+        <label>MQTT-Passwort
+          <input name="mqtt_password" type="password" maxlength="512"
+                 autocomplete="new-password" aria-describedby="devicePasswordHelp">
+          <small id="devicePasswordHelp">
+            Beim Bearbeiten leer lassen, um das vorhandene Passwort beizubehalten.
+          </small>
+        </label>
         <label>Relais
           <select name="relay_index">
             <option value="1">Relais 1</option>
@@ -134,7 +143,7 @@ Purpose: Hosts the public monitor, GA legend control, and protected administrati
         <input name="enabled" type="checkbox" checked><span>Gerät aktiv</span>
       </label>
       <p class="muted">
-        MQTT-Zugangsdaten werden nicht über die Weboberfläche übertragen oder angezeigt.
+        MQTT-Passwörter werden nur als nicht rückrechenbarer Hash gespeichert und niemals angezeigt.
       </p>
       <p id="deviceError" class="form-error" role="alert"></p>
       <button class="primary-button" type="submit">Speichern</button>
