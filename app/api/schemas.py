@@ -1,13 +1,15 @@
 """
 File: app/api/schemas.py
-Version: 0.3.0
-Date: 2026-08-06
+Version: 0.3.1
+Date: 2026-08-07
 Purpose: Defines strict validated input contracts for authentication, devices, and control.
+Changes:
+- 0.3.1: Accepts write-only device MQTT passwords; empty update values preserve the stored secret.
 """
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class StrictInput(BaseModel):
@@ -25,12 +27,18 @@ class DeviceInput(StrictInput):
     mqtt_topic_prefix: str = Field(min_length=1, max_length=255)
     mqtt_client_id: str = Field(min_length=1, max_length=120)
     mqtt_username: str | None = Field(default=None, max_length=120)
+    mqtt_password: str | None = Field(default=None, max_length=512)
     device_type: Literal["shelly_pro_3em", "tasmota_plug"] = "shelly_pro_3em"
     controllable: bool = False
     relay_index: int = Field(default=1, ge=1, le=1)
     enabled: bool = True
     sort_order: int = Field(default=0, ge=0, le=10_000)
     color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
+
+    @field_validator("mqtt_password", mode="before")
+    @classmethod
+    def empty_mqtt_password_is_unset(cls, value: object) -> object:
+        return None if value == "" else value
 
     @model_validator(mode="after")
     def validate_device_type(self) -> "DeviceInput":
@@ -61,12 +69,18 @@ class DeviceUpdate(StrictInput):
     mqtt_topic_prefix: str | None = Field(default=None, min_length=1, max_length=255)
     mqtt_client_id: str | None = Field(default=None, min_length=1, max_length=120)
     mqtt_username: str | None = Field(default=None, max_length=120)
+    mqtt_password: str | None = Field(default=None, max_length=512)
     device_type: Literal["shelly_pro_3em", "tasmota_plug"] | None = None
     controllable: bool | None = None
     relay_index: int | None = Field(default=None, ge=1, le=1)
     enabled: bool | None = None
     sort_order: int | None = Field(default=None, ge=0, le=10_000)
     color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
+
+    @field_validator("mqtt_password", mode="before")
+    @classmethod
+    def empty_mqtt_password_keeps_existing(cls, value: object) -> object:
+        return None if value == "" else value
 
 
 class PowerInput(StrictInput):
