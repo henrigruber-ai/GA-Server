@@ -1,6 +1,6 @@
 """
 File: tests/integration/test_api.py
-Version: 0.3.1
+Version: 0.3.2
 Date: 2026-08-07
 Purpose: Exercises public access, auth, CSRF, device lifecycle, history, and WebSockets.
 Changes:
@@ -8,6 +8,7 @@ Changes:
 - 0.1.1: Verifies readiness when MQTT is intentionally disabled.
 - 0.2.0: Verifies bundled multi-unit history and raw live-series metadata.
 - 0.3.1: Verifies write-only MQTT password storage and blank-edit preservation.
+- 0.3.2: Verifies Tasmota creation and validation errors during device-type edits.
 """
 
 from datetime import UTC, datetime
@@ -30,6 +31,22 @@ def device_payload(name: str = "Werkstatt") -> dict[str, object]:
         "enabled": True,
         "sort_order": 5,
         "color": "#123abc",
+    }
+
+
+def tasmota_payload(name: str = "Löwenweg") -> dict[str, object]:
+    return {
+        "name": name,
+        "technical_device_id": "id139_loewenweg",
+        "mqtt_topic_prefix": "id139",
+        "mqtt_client_id": "smartplug_id139",
+        "mqtt_username": "user1",
+        "device_type": "tasmota_plug",
+        "controllable": True,
+        "relay_index": 1,
+        "enabled": True,
+        "sort_order": 0,
+        "color": "#ffff00",
     }
 
 
@@ -97,6 +114,55 @@ def test_device_create_rename_disable_and_identity_stability(
     )
     assert disabled.json()["enabled"] is False
     assert client.get("/api/public/devices").json() == []
+
+
+def test_tasmota_create_and_invalid_type_edit_returns_422(
+    authenticated: tuple[TestClient, str],
+) -> None:
+    client, csrf = authenticated
+    created_tasmota = client.post(
+        "/api/admin/devices",
+        json=tasmota_payload(),
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert created_tasmota.status_code == 201
+    assert created_tasmota.json()["device_type"] == "tasmota_plug"
+    assert created_tasmota.json()["mqtt_topic_prefix"] == "id139"
+
+    created_shelly = client.post(
+        "/api/admin/devices",
+        json=device_payload(),
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert created_shelly.status_code == 201
+    device_id = created_shelly.json()["id"]
+
+    invalid = client.patch(
+        f"/api/admin/devices/{device_id}",
+        json={
+            "device_type": "tasmota_plug",
+            "mqtt_topic_prefix": "ga/devices/id140",
+            "controllable": True,
+        },
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert invalid.status_code == 422
+    assert invalid.json()["detail"] == (
+        "Für Tasmota nur das nackte Gerätetopic ohne cmnd/, stat/ oder tele/ speichern."
+    )
+
+    valid = client.patch(
+        f"/api/admin/devices/{device_id}",
+        json={
+            "device_type": "tasmota_plug",
+            "mqtt_topic_prefix": "id140",
+            "controllable": True,
+        },
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert valid.status_code == 200
+    assert valid.json()["device_type"] == "tasmota_plug"
+    assert valid.json()["mqtt_topic_prefix"] == "id140"
 
 
 def test_device_mqtt_password_is_write_only_and_blank_update_keeps_hash(
