@@ -1,10 +1,11 @@
 """
 File: app/auth/security.py
-Version: 0.1.0
-Date: 2026-08-03
+Version: 0.3.1
+Date: 2026-08-07
 Purpose: Implements Argon2id passwords, server-side sessions, CSRF, and login throttling.
 Changes:
 - 0.1.0: Initial implementation.
+- 0.3.1: Adds one-way hashing for device-specific MQTT passwords.
 """
 
 from __future__ import annotations
@@ -33,6 +34,12 @@ PASSWORD_HASHER = PasswordHasher(time_cost=3, memory_cost=65536, parallelism=2)
 def hash_password(password: str) -> str:
     if len(password) < 12:
         raise ValueError("Das Passwort muss mindestens 12 Zeichen lang sein.")
+    return PASSWORD_HASHER.hash(password)
+
+
+def hash_mqtt_password(password: str) -> str:
+    if not password:
+        raise ValueError("Das MQTT-Passwort darf nicht leer sein.")
     return PASSWORD_HASHER.hash(password)
 
 
