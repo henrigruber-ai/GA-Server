@@ -1,11 +1,17 @@
 <!--
 File: CHANGELOG.md
-Version: 0.3.1
+Version: 0.3.2
 Date: 2026-08-07
 Purpose: Records user-visible changes by semantic version.
 -->
 
 # Versionshistorie
+
+## 0.3.2 – 2026-08-07
+
+- Tasmota-Steckdosen können mit ihrem nackten Tasmota-Gerätetopic, zum Beispiel `id139`, angelegt werden.
+- Beim Wechsel eines bestehenden Geräts auf Tasmota führt ein ungültiges Topic nicht mehr zu HTTP 500, sondern zu einer verständlichen Validierungsmeldung.
+- Regressionstests decken das Anlegen einer Tasmota-Steckdose sowie die Bearbeitung mit gültigem und ungültigem Gerätetopic ab.
 
 ## 0.3.1 – 2026-08-07
 
