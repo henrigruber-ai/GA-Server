@@ -1,11 +1,12 @@
 """
 File: app/api/routes_admin.py
-Version: 0.3.1
+Version: 0.3.2
 Date: 2026-08-07
 Purpose: Implements the authenticated and audited administration API.
 Changes:
 - 0.1.0: Initial implementation.
 - 0.3.1: Stores device MQTT passwords as Argon2 hashes and preserves them on blank edits.
+- 0.3.2: Returns a validation error instead of HTTP 500 for invalid device-type edits.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ import colorsys
 import json
 
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
@@ -54,6 +56,14 @@ def _audit(
                 details=details[:2000],
             )
         )
+
+
+def _validation_detail(error: ValidationError) -> str:
+    errors = error.errors()
+    if not errors:
+        return "Ungültige Gerätedaten."
+    message = str(errors[0].get("msg") or "Ungültige Gerätedaten.")
+    return message.removeprefix("Value error, ")
 
 
 @router.get("/devices")
@@ -123,6 +133,8 @@ def update_device(device_id: str, payload: DeviceUpdate, request: Request) -> di
             if mqtt_password:
                 device.mqtt_password_hash = hash_mqtt_password(mqtt_password)
             device.updated_at = utc_now()
+    except ValidationError as error:
+        raise HTTPException(status_code=422, detail=_validation_detail(error)) from error
     except IntegrityError as error:
         raise HTTPException(
             status_code=409, detail="Geräte-ID, Topic oder Client-ID existiert bereits."
